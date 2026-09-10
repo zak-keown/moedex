@@ -240,9 +240,9 @@ def codex_rust_crate(
         lib_data_extra: Extra runtime data for the library target.
         binary_rustc_flags_extra: Mapping from binary names to extra rustc
             flags for those binary targets.
-        binaries_with_build_commit: Binary names that embed STABLE_GIT_COMMIT from the
-            generated build-commit environment file. Other workspace status is
-            excluded from their compilation inputs.
+        binaries_with_build_commit: Binary names that embed stable build provenance
+            from the generated build-commit environment file. Other workspace status
+            is excluded from their compilation inputs.
         rustc_env: Extra rustc_env entries to merge with defaults.
         rustc_env_files: Generated compiler environment files for the library target.
         deps_extra: Extra normal deps beyond @crates resolution.
@@ -413,7 +413,8 @@ def codex_rust_crate(
             # and CI workers, while BUILD_TIMESTAMP varies across builds; these
             # unrelated values prevent remote cache reuse for the same commit.
             # Isolate status inputs in build-commit-env's cheap action so its
-            # output, and hence this compiler input, changes only with the commit.
+            # output, and hence this compiler input, changes only with stable build
+            # provenance.
             rustc_env_files = ["//bazel/build-info:build-commit-env"] if binary in binaries_with_build_commit else [],
             srcs = native.glob(["src/**/*.rs"]),
             stamp = 0,

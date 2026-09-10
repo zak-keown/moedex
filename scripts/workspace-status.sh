@@ -13,3 +13,5 @@ else
 fi
 
 printf 'STABLE_GIT_COMMIT %s\n' "${build_commit}"
+printf 'STABLE_UPSTREAM_GIT_COMMIT %s\n' "${STABLE_UPSTREAM_GIT_COMMIT:-unknown}"
+printf 'MOEDEX_RELEASE_CHANNEL %s\n' "${MOEDEX_RELEASE_CHANNEL:-github}"

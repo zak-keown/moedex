@@ -2533,6 +2533,7 @@ name = "codex-build-info"
 version = "0.0.0"
 dependencies = [
  "codex-install-context",
+ "codex-product-identity",
  "pretty_assertions",
  "semver",
  "serde",
@@ -4216,6 +4217,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-product-identity"
+version = "0.0.0"
+
+[[package]]
 name = "codex-prompts"
 version = "0.0.0"
 dependencies = [
@@ -4933,6 +4938,7 @@ dependencies = [
 name = "codex-utils-home-dir"
 version = "0.0.0"
 dependencies = [
+ "codex-product-identity",
  "codex-utils-absolute-path",
  "dirs",
  "pretty_assertions",
