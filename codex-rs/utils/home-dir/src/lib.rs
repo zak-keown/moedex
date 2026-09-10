@@ -36,20 +36,8 @@ pub fn resolve_product_home(
     codex_home: Option<&OsStr>,
     user_home: &Path,
 ) -> io::Result<ResolvedProductHome> {
-    if let Some(moedex_home) = moedex_home.filter(|path| !path.is_empty()) {
-        return resolve_explicit_home(
-            moedex_home,
-            PRODUCT_IDENTITY.primary_home_env,
-            HomeSource::MoedexHome,
-        );
-    }
-
-    if let Some(codex_home) = codex_home.filter(|path| !path.is_empty()) {
-        return resolve_explicit_home(
-            codex_home,
-            PRODUCT_IDENTITY.compatibility_home_env,
-            HomeSource::CodexHomeCompatibility,
-        );
+    if let Some(home) = resolve_explicit_product_home(moedex_home, codex_home) {
+        return home;
     }
 
     Ok(ResolvedProductHome {
@@ -58,6 +46,29 @@ pub fn resolve_product_home(
         )?,
         source: HomeSource::Default,
     })
+}
+
+fn resolve_explicit_product_home(
+    moedex_home: Option<&OsStr>,
+    codex_home: Option<&OsStr>,
+) -> Option<io::Result<ResolvedProductHome>> {
+    if let Some(moedex_home) = moedex_home.filter(|path| !path.is_empty()) {
+        return Some(resolve_explicit_home(
+            moedex_home,
+            PRODUCT_IDENTITY.primary_home_env,
+            HomeSource::MoedexHome,
+        ));
+    }
+
+    if let Some(codex_home) = codex_home.filter(|path| !path.is_empty()) {
+        return Some(resolve_explicit_home(
+            codex_home,
+            PRODUCT_IDENTITY.compatibility_home_env,
+            HomeSource::CodexHomeCompatibility,
+        ));
+    }
+
+    None
 }
 
 fn resolve_explicit_home(
@@ -98,13 +109,30 @@ fn resolve_explicit_home(
 
 /// Return the product home directory and the source that selected it.
 pub fn find_product_home() -> io::Result<ResolvedProductHome> {
-    let user_home = home_dir()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not find home directory"))?;
     let moedex_home =
         std::env::var_os(PRODUCT_IDENTITY.primary_home_env).filter(|path| !path.is_empty());
     let codex_home =
         std::env::var_os(PRODUCT_IDENTITY.compatibility_home_env).filter(|path| !path.is_empty());
-    resolve_product_home(moedex_home.as_deref(), codex_home.as_deref(), &user_home)
+    find_product_home_from_env(moedex_home.as_deref(), codex_home.as_deref(), home_dir)
+}
+
+fn find_product_home_from_env<F>(
+    moedex_home: Option<&OsStr>,
+    codex_home: Option<&OsStr>,
+    find_user_home: F,
+) -> io::Result<ResolvedProductHome>
+where
+    F: FnOnce() -> Option<PathBuf>,
+{
+    if let Some(home) = resolve_explicit_product_home(moedex_home, codex_home) {
+        return home;
+    }
+
+    let user_home = find_user_home()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not find home directory"))?;
+    resolve_product_home(
+        /*moedex_home*/ None, /*codex_home*/ None, &user_home,
+    )
 }
 
 /// Returns the product configuration directory without exposing its source.
@@ -118,12 +146,10 @@ pub fn find_codex_home() -> io::Result<AbsolutePathBuf> {
 
 #[cfg(test)]
 fn find_codex_home_from_env(codex_home_env: Option<&str>) -> io::Result<AbsolutePathBuf> {
-    let user_home = home_dir()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not find home directory"))?;
-    resolve_product_home(
+    find_product_home_from_env(
         /*moedex_home*/ None,
         codex_home_env.map(OsStr::new),
-        &user_home,
+        home_dir,
     )
     .map(|home| home.path)
 }
@@ -133,6 +159,7 @@ mod tests {
     use super::HomeSource;
     use super::ResolvedProductHome;
     use super::find_codex_home_from_env;
+    use super::find_product_home_from_env;
     use super::resolve_product_home;
     use codex_utils_absolute_path::AbsolutePathBuf;
     use dirs::home_dir;
@@ -140,7 +167,29 @@ mod tests {
     use std::ffi::OsStr;
     use std::fs;
     use std::io::ErrorKind;
+    use std::path::PathBuf;
     use tempfile::TempDir;
+
+    #[test]
+    fn explicit_product_home_does_not_require_default_home_discovery() {
+        let root = TempDir::new().expect("temp home");
+        let moedex_home = root.path().join("moedex-home");
+        fs::create_dir_all(&moedex_home).expect("create Moedex home");
+
+        assert_eq!(
+            find_product_home_from_env(Some(moedex_home.as_os_str()), None, || None::<PathBuf>)
+                .expect("explicit Moedex home"),
+            ResolvedProductHome {
+                path: AbsolutePathBuf::from_absolute_path(
+                    moedex_home
+                        .canonicalize()
+                        .expect("canonicalize Moedex home"),
+                )
+                .expect("absolute Moedex home"),
+                source: HomeSource::MoedexHome,
+            },
+        );
+    }
 
     #[test]
     fn moedex_home_wins_over_compatibility_home() {
