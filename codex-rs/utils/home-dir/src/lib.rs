@@ -177,8 +177,12 @@ mod tests {
         fs::create_dir_all(&moedex_home).expect("create Moedex home");
 
         assert_eq!(
-            find_product_home_from_env(Some(moedex_home.as_os_str()), None, || None::<PathBuf>)
-                .expect("explicit Moedex home"),
+            find_product_home_from_env(
+                Some(moedex_home.as_os_str()),
+                /*codex_home*/ None,
+                || None::<PathBuf>,
+            )
+            .expect("explicit Moedex home"),
             ResolvedProductHome {
                 path: AbsolutePathBuf::from_absolute_path(
                     moedex_home
