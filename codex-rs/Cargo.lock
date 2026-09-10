@@ -2304,7 +2304,9 @@ dependencies = [
  "blake3",
  "codex-app-server-protocol",
  "codex-app-server-transport",
+ "codex-diagnostics",
  "codex-http-client",
+ "codex-product-identity",
  "codex-uds",
  "codex-utils-home-dir",
  "futures",
@@ -3174,8 +3176,12 @@ dependencies = [
 name = "codex-diagnostics"
 version = "0.0.0"
 dependencies = [
+ "codex-utils-absolute-path",
+ "codex-utils-home-dir",
  "libc",
  "pretty_assertions",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -3812,10 +3818,12 @@ dependencies = [
  "chrono",
  "codex-agent-identity",
  "codex-config",
+ "codex-diagnostics",
  "codex-http-client",
  "codex-keyring-store",
  "codex-model-provider-info",
  "codex-otel",
+ "codex-product-identity",
  "codex-protocol",
  "codex-secrets",
  "codex-terminal-detection",
@@ -4470,6 +4478,7 @@ dependencies = [
  "base64 0.22.1",
  "codex-git-utils",
  "codex-keyring-store",
+ "codex-product-identity",
  "keyring",
  "pretty_assertions",
  "rand 0.9.3",

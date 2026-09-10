@@ -329,7 +329,7 @@ fn seed_secrets_backend_and_fallback_auth_file_for_delete(
         codex_home.to_path_buf(),
         SecretsBackendKind::Local,
         Arc::new(mock_keyring.clone()),
-        LocalSecretsNamespace::CodexAuth,
+        LocalSecretsNamespace::MoedexAuth,
     );
     manager.set(
         &SecretScope::Global,
@@ -350,7 +350,7 @@ fn seed_secrets_backend_with_auth(
         codex_home.to_path_buf(),
         SecretsBackendKind::Local,
         Arc::new(mock_keyring.clone()),
-        LocalSecretsNamespace::CodexAuth,
+        LocalSecretsNamespace::MoedexAuth,
     );
     manager.set(
         &SecretScope::Global,
@@ -369,7 +369,7 @@ fn assert_keyring_saved_auth_and_removed_fallback(
         codex_home.to_path_buf(),
         SecretsBackendKind::Local,
         Arc::new(mock_keyring.clone()),
-        LocalSecretsNamespace::CodexAuth,
+        LocalSecretsNamespace::MoedexAuth,
     );
     let saved_value = manager
         .get(&SecretScope::Global, &CODEX_AUTH_SECRET_NAME)?
@@ -396,7 +396,7 @@ fn assert_keyring_saved_auth_and_removed_fallback(
 }
 
 fn encrypted_auth_file(codex_home: &Path) -> PathBuf {
-    codex_home.join("secrets").join("codex_auth.age")
+    codex_home.join("secrets").join("moedex_auth.age")
 }
 
 fn id_token_with_prefix(prefix: &str) -> IdTokenInfo {
@@ -812,6 +812,131 @@ fn auto_auth_storage_delete_removes_keyring_and_file() -> anyhow::Result<()> {
     assert!(
         !auth_file.exists(),
         "fallback auth.json should be removed after delete"
+    );
+    Ok(())
+}
+
+#[test]
+fn direct_auth_uses_moedex_service() -> anyhow::Result<()> {
+    auth_uses_moedex_service_and_logout_preserves_stock(AuthKeyringBackendKind::Direct)
+}
+#[test]
+fn encrypted_auth_uses_moedex_service() -> anyhow::Result<()> {
+    auth_uses_moedex_service_and_logout_preserves_stock(AuthKeyringBackendKind::Secrets)
+}
+fn auth_uses_moedex_service_and_logout_preserves_stock(
+    backend: AuthKeyringBackendKind,
+) -> anyhow::Result<()> {
+    #[derive(Debug, Default)]
+    struct Services(Mutex<HashMap<(String, String), String>>);
+    impl KeyringStore for Services {
+        fn load(
+            &self,
+            service: &str,
+            account: &str,
+        ) -> Result<Option<String>, codex_keyring_store::CredentialStoreError> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .get(&(service.into(), account.into()))
+                .cloned())
+        }
+        fn save(
+            &self,
+            service: &str,
+            account: &str,
+            value: &str,
+        ) -> Result<(), codex_keyring_store::CredentialStoreError> {
+            self.0
+                .lock()
+                .unwrap()
+                .insert((service.into(), account.into()), value.into());
+            Ok(())
+        }
+        fn delete(
+            &self,
+            service: &str,
+            account: &str,
+        ) -> Result<bool, codex_keyring_store::CredentialStoreError> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .remove(&(service.into(), account.into()))
+                .is_some())
+        }
+    }
+    let home = tempdir()?;
+    let store = Arc::new(Services::default());
+    let key = compute_store_key(home.path())?;
+    let stock = serde_json::to_string(&auth_with_prefix("stock"))?;
+    store.save("Codex Auth", &key, &stock)?;
+    let stock_manager = SecretsManager::new_with_keyring_store_and_namespace(
+        home.path().into(),
+        SecretsBackendKind::Local,
+        store.clone(),
+        LocalSecretsNamespace::CodexAuth,
+    );
+    stock_manager.set(&SecretScope::Global, &CODEX_AUTH_SECRET_NAME, &stock)?;
+    let stock_file = home.path().join("secrets/codex_auth.age");
+    let stock_bytes = std::fs::read(&stock_file)?;
+    let auth = auth_with_prefix("moedex");
+    let storage = create_keyring_auth_storage(home.path().into(), store.clone(), backend);
+    storage.save(&auth)?;
+    let account = match backend {
+        AuthKeyringBackendKind::Direct => key.clone(),
+        AuthKeyringBackendKind::Secrets => compute_keyring_account(home.path()),
+    };
+    assert!(
+        store.load("Moedex Auth", &account)?.is_some(),
+        "Moedex service owns credentials"
+    );
+    assert_eq!(storage.load()?, Some(auth));
+    storage.delete()?;
+    assert_eq!(store.load("Codex Auth", &key)?, Some(stock.clone()));
+    assert_eq!(std::fs::read(stock_file)?, stock_bytes);
+    assert_eq!(
+        stock_manager.get(&SecretScope::Global, &CODEX_AUTH_SECRET_NAME)?,
+        Some(stock)
+    );
+    Ok(())
+}
+
+#[test]
+fn auth_writer_rejects_live_stock_owner_without_overwriting_credentials() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let state = home.path().join("app-server-daemon");
+    std::fs::create_dir(&state)?;
+    let owner = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(state.join("daemon.lock"))?;
+    owner.lock()?;
+    let auth = auth_with_prefix("stock");
+    let original = serde_json::to_string(&auth)?;
+    std::fs::write(get_auth_file(home.path()), &original)?;
+    let storage = create_auth_storage(
+        home.path().into(),
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::Direct,
+    );
+    assert_eq!(
+        storage
+            .save(&auth_with_prefix("moedex"))
+            .expect_err("live owner")
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(
+        storage.delete().expect_err("live owner").kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(
+        std::fs::read_to_string(get_auth_file(home.path()))?,
+        original
     );
     Ok(())
 }

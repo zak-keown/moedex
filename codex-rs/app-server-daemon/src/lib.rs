@@ -40,7 +40,7 @@ const PID_FILE_NAME: &str = "app-server.pid";
 const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
 const OPERATION_LOCK_FILE_NAME: &str = "daemon.lock";
 const SETTINGS_FILE_NAME: &str = "settings.json";
-const STATE_DIR_NAME: &str = "app-server-daemon";
+const STATE_DIR_NAME: &str = "moedex-daemon";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LifecycleCommand {
@@ -289,6 +289,11 @@ fn ensure_supported_platform() -> Result<()> {
     ))
 }
 
+struct OperationLock {
+    file: tokio::fs::File,
+    _home_guard: Vec<std::fs::File>,
+}
+
 struct Daemon {
     socket_path: PathBuf,
     pid_file: PathBuf,
@@ -436,7 +441,7 @@ impl Daemon {
         managed_codex_bin: &Path,
     ) -> Result<RestartIfRunningOutcome> {
         let operation_lock = self.open_operation_lock_file().await?;
-        if !try_lock_file(&operation_lock)? {
+        if !try_lock_file(&operation_lock.file)? {
             return Ok(RestartIfRunningOutcome::Busy);
         }
         let settings = self.load_settings().await?;
@@ -925,10 +930,10 @@ impl Daemon {
         DaemonSettings::load(&self.settings_file).await
     }
 
-    async fn acquire_operation_lock(&self) -> Result<tokio::fs::File> {
+    async fn acquire_operation_lock(&self) -> Result<OperationLock> {
         let operation_lock = self.open_operation_lock_file().await?;
         let deadline = tokio::time::Instant::now() + OPERATION_LOCK_TIMEOUT;
-        while !try_lock_file(&operation_lock)? {
+        while !try_lock_file(&operation_lock.file)? {
             if tokio::time::Instant::now() >= deadline {
                 return Err(anyhow!(
                     "timed out waiting for daemon operation lock {}",
@@ -940,7 +945,13 @@ impl Daemon {
         Ok(operation_lock)
     }
 
-    async fn open_operation_lock_file(&self) -> Result<tokio::fs::File> {
+    async fn open_operation_lock_file(&self) -> Result<OperationLock> {
+        let home = self
+            .settings_file
+            .parent()
+            .and_then(Path::parent)
+            .context("daemon settings path has no product home")?;
+        let home_guard = codex_diagnostics::acquire_selected_home_write_guard(home)?;
         if let Some(parent) = self.operation_lock_file.parent() {
             #[cfg(unix)]
             if let Some(home) = parent.parent() {
@@ -955,7 +966,7 @@ impl Daemon {
                     )
                 })?;
         }
-        tokio::fs::OpenOptions::new()
+        let file = tokio::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
@@ -966,7 +977,11 @@ impl Daemon {
                     "failed to open daemon operation lock {}",
                     self.operation_lock_file.display()
                 )
-            })
+            })?;
+        Ok(OperationLock {
+            file,
+            _home_guard: home_guard,
+        })
     }
 
     async fn output(
@@ -1081,6 +1096,72 @@ mod tests {
     use crate::client::ProbeInfo;
     #[cfg(unix)]
     use crate::settings::DaemonSettings;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn same_host_daemon_child_receives_its_resolved_home() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = TempDir::new().expect("home");
+        let state = home.path().join("moedex-daemon");
+        std::fs::create_dir(&state).expect("state");
+        let binary = home.path().join("child");
+        std::fs::write(&binary, "#!/bin/sh\ncase \"$*\" in *--help*) exit 0;; esac\nprintf '%s|%s' \"$MOEDEX_HOME\" \"$CODEX_HOME\" > \"$MOEDEX_HOME/observed-home\"\nexec sleep 30\n").expect("child");
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        let backend = crate::backend::pid_backend(crate::backend::BackendPaths {
+            codex_bin: binary,
+            pid_file: state.join("app-server.pid"),
+            update_pid_file: state.join("updater.pid"),
+            remote_control_enabled: false,
+        });
+        backend.start().await.expect("start");
+        let observed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(value) =
+                    tokio::fs::read_to_string(home.path().join("observed-home")).await
+                {
+                    break value;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        backend.stop().await.expect("stop");
+        assert_eq!(
+            observed.expect("child received home"),
+            format!("{}|{}", home.path().display(), home.path().display())
+        );
+    }
+
+    #[tokio::test]
+    async fn daemon_operation_rejects_a_live_stock_owner() {
+        let home = TempDir::new().expect("home");
+        let stock = home.path().join("app-server-daemon");
+        std::fs::create_dir(&stock).expect("stock state");
+        let owner = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(stock.join("daemon.lock"))
+            .expect("owner");
+        owner.lock().expect("live owner");
+        let state = home.path().join(super::STATE_DIR_NAME);
+        let daemon = Daemon {
+            socket_path: state.join("server.sock"),
+            pid_file: state.join("server.pid"),
+            update_pid_file: state.join("updater.pid"),
+            operation_lock_file: state.join("daemon.lock"),
+            settings_file: state.join("settings.json"),
+            managed_codex_bin: home.path().join("missing"),
+        };
+        let error = daemon
+            .run(super::LifecycleCommand::Stop)
+            .await
+            .expect_err("stock owner blocks mutation");
+        assert!(error.to_string().contains("incompatible home owner"));
+        assert!(!state.exists(), "guard runs before creating Moedex state");
+    }
 
     #[test]
     fn remote_control_status_uses_camel_case_json() {
@@ -1213,7 +1294,7 @@ mod tests {
     #[tokio::test]
     async fn stop_and_fresh_start_discard_pending_thread_restore() {
         let home = TempDir::new().expect("home");
-        let state = home.path().join("app-server-daemon");
+        let state = home.path().join("moedex-daemon");
         codex_uds::prepare_private_socket_directory(&state)
             .await
             .expect("private state directory");
@@ -1270,7 +1351,7 @@ mod tests {
             .expect("executable local bin");
         std::os::unix::fs::symlink("local-main", standalone.join("current"))
             .expect("current local build");
-        let state = home.path().join("app-server-daemon");
+        let state = home.path().join("moedex-daemon");
         let daemon = Daemon {
             socket_path: home
                 .path()

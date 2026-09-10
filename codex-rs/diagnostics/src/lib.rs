@@ -1,7 +1,81 @@
+use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_home_dir::HomeSource;
+use codex_utils_home_dir::ResolvedProductHome;
 use std::sync::Mutex;
 use std::sync::Once;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+
+/// Effective local state location, with no credential or configuration contents.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HomeDiagnostic {
+    pub path: AbsolutePathBuf,
+    pub source: HomeSource,
+    pub shares_codex_state: bool,
+}
+
+/// Reports whether the explicit Codex compatibility override selected this home.
+pub fn home_diagnostic(home: ResolvedProductHome) -> HomeDiagnostic {
+    HomeDiagnostic {
+        shares_codex_state: home.source == HomeSource::CodexHomeCompatibility,
+        path: home.path,
+        source: home.source,
+    }
+}
+
+/// Checks existing stock writer locks without reading their contents. Retain the
+/// returned handles through the write so an existing stock lock cannot race it.
+/// Stock clients that do not take these locks cannot participate in this guard.
+fn acquire_home_write_guard(home: &ResolvedProductHome) -> std::io::Result<Vec<std::fs::File>> {
+    if home.source == HomeSource::CodexHomeCompatibility {
+        tracing::warn!(path = %home.path.display(), source = ?home.source, "shared product home");
+    }
+    let mut guards = Vec::new();
+    for relative in [
+        "app-server-daemon/daemon.lock",
+        "app-server-control/app-server-startup.lock",
+    ] {
+        let path = home.path.as_path().join(relative);
+        let file = match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if let Err(error) = file.try_lock() {
+            let kind = match error {
+                std::fs::TryLockError::WouldBlock => std::io::ErrorKind::WouldBlock,
+                std::fs::TryLockError::Error(error) => error.kind(),
+            };
+            return Err(std::io::Error::new(
+                kind,
+                format!(
+                    "incompatible home owner: path={}, source={:?}",
+                    home.path.display(),
+                    home.source
+                ),
+            ));
+        }
+        guards.push(file);
+    }
+    Ok(guards)
+}
+
+/// Checks a caller-selected local path using its environment source when known.
+pub fn acquire_selected_home_write_guard(
+    path: &std::path::Path,
+) -> std::io::Result<Vec<std::fs::File>> {
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let path = AbsolutePathBuf::try_from(path)?;
+    let source = codex_utils_home_dir::find_product_home()
+        .ok()
+        .filter(|home| home.path == path)
+        .map_or(HomeSource::MoedexHome, |home| home.source);
+    acquire_home_write_guard(&ResolvedProductHome { path, source })
+}
 
 static GAUGES: Mutex<Vec<&'static Gauge>> = Mutex::new(Vec::new());
 

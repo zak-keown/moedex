@@ -51,6 +51,8 @@ pub enum LocalSecretsNamespace {
     ManagedSecrets,
     /// Codex authentication credentials used by the CLI, TUI, app server, and other clients.
     CodexAuth,
+    /// Moedex authentication in an independent encrypted file and keyring service.
+    MoedexAuth,
     /// OAuth credentials for external MCP servers.
     McpOAuth,
 }
@@ -155,6 +157,7 @@ impl LocalSecretsBackend {
         let filename = match self.namespace {
             LocalSecretsNamespace::ManagedSecrets => LOCAL_SECRETS_FILENAME,
             LocalSecretsNamespace::CodexAuth => CODEX_AUTH_SECRETS_FILENAME,
+            LocalSecretsNamespace::MoedexAuth => "moedex_auth.age",
             LocalSecretsNamespace::McpOAuth => MCP_OAUTH_SECRETS_FILENAME,
         };
         self.secrets_dir().join(filename)
@@ -236,9 +239,17 @@ impl LocalSecretsBackend {
 
     fn load_or_create_passphrase(&self) -> Result<SecretString> {
         let account = compute_keyring_account(&self.codex_home);
+        let service = match self.namespace {
+            LocalSecretsNamespace::MoedexAuth => {
+                codex_product_identity::PRODUCT_IDENTITY.credential_service
+            }
+            LocalSecretsNamespace::ManagedSecrets
+            | LocalSecretsNamespace::CodexAuth
+            | LocalSecretsNamespace::McpOAuth => keyring_service(),
+        };
         let loaded = self
             .keyring_store
-            .load(keyring_service(), &account)
+            .load(service, &account)
             .map_err(|err| anyhow::anyhow!(err.message()))
             .with_context(|| format!("failed to load secrets key from keyring for {account}"))?;
         match loaded {
@@ -249,7 +260,7 @@ impl LocalSecretsBackend {
                 // fully local/offline for the MVP.
                 let generated = generate_passphrase()?;
                 self.keyring_store
-                    .save(keyring_service(), &account, generated.expose_secret())
+                    .save(service, &account, generated.expose_secret())
                     .map_err(|err| anyhow::anyhow!(err.message()))
                     .context("failed to persist secrets key in keyring")?;
                 Ok(generated)

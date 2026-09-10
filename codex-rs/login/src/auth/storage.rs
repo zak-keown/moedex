@@ -232,7 +232,7 @@ static CODEX_AUTH_SECRET_NAME: Lazy<SecretName> =
         Ok(name) => name,
         Err(err) => unreachable!("CODEX_AUTH should be a valid secret name: {err}"),
     });
-const KEYRING_SERVICE: &str = "Codex Auth";
+const KEYRING_SERVICE: &str = codex_product_identity::PRODUCT_IDENTITY.credential_service;
 
 // turns codex_home path into a stable, short key string
 fn compute_store_key(codex_home: &Path) -> std::io::Result<String> {
@@ -345,7 +345,7 @@ impl SecretsKeyringAuthStorage {
             codex_home.clone(),
             SecretsBackendKind::Local,
             keyring_store,
-            LocalSecretsNamespace::CodexAuth,
+            LocalSecretsNamespace::MoedexAuth,
         );
         Self {
             codex_home,
@@ -505,7 +505,45 @@ pub(super) fn create_auth_storage(
     keyring_backend_kind: AuthKeyringBackendKind,
 ) -> Arc<dyn AuthStorageBackend> {
     let keyring_store: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
-    create_auth_storage_with_store(codex_home, mode, keyring_store, keyring_backend_kind)
+    if mode == AuthCredentialsStoreMode::Ephemeral {
+        return create_auth_storage_with_store(
+            codex_home,
+            mode,
+            keyring_store,
+            keyring_backend_kind,
+        );
+    }
+    Arc::new(GuardedAuthStorage {
+        backend: create_auth_storage_with_store(
+            codex_home.clone(),
+            mode,
+            keyring_store,
+            keyring_backend_kind,
+        ),
+        home: codex_home,
+    })
+}
+
+// One guard encloses the complete backend write, including Auto fallback and
+// encrypted/direct cleanup, so nested storage adapters do not reacquire locks.
+#[derive(Debug)]
+struct GuardedAuthStorage {
+    home: PathBuf,
+    backend: Arc<dyn AuthStorageBackend>,
+}
+
+impl AuthStorageBackend for GuardedAuthStorage {
+    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+        self.backend.load()
+    }
+    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+        let _guard = codex_diagnostics::acquire_selected_home_write_guard(&self.home)?;
+        self.backend.save(auth)
+    }
+    fn delete(&self) -> std::io::Result<bool> {
+        let _guard = codex_diagnostics::acquire_selected_home_write_guard(&self.home)?;
+        self.backend.delete()
+    }
 }
 
 fn create_auth_storage_with_store(

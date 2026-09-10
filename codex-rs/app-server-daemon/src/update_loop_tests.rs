@@ -145,7 +145,7 @@ fn manual_update_daemon(home: &TempDir) -> (Daemon, String) {
     std::os::unix::fs::symlink(format!("releases/{release}"), standalone.join("current"))
         .expect("current release");
     std::fs::write(standalone.join("auto-update-version"), &release).expect("latest marker");
-    let state = home.path().join("app-server-daemon");
+    let state = home.path().join("moedex-daemon");
     (
         Daemon {
             socket_path: home.path().join("app-server-control/server.sock"),

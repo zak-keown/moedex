@@ -56,3 +56,54 @@ fn snapshot_includes_process_memory_and_registers_gauges_once() {
     #[cfg(not(target_os = "macos"))]
     assert_eq!(diagnostics.process.physical_footprint_bytes, None);
 }
+
+#[test]
+fn compatibility_home_diagnostic_contains_only_path_and_source() {
+    use codex_utils_absolute_path::AbsolutePathBuf;
+    use codex_utils_home_dir::HomeSource;
+    use codex_utils_home_dir::ResolvedProductHome;
+    let root = tempfile::tempdir().expect("home");
+    let home = ResolvedProductHome {
+        path: AbsolutePathBuf::from_absolute_path(root.path()).expect("absolute"),
+        source: HomeSource::CodexHomeCompatibility,
+    };
+    let report = super::home_diagnostic(home.clone());
+    assert_eq!(
+        report,
+        super::HomeDiagnostic {
+            path: home.path,
+            source: home.source,
+            shares_codex_state: true
+        }
+    );
+}
+
+#[test]
+fn shared_home_guard_rejects_a_live_stock_owner_and_accepts_stale_lock() {
+    use codex_utils_absolute_path::AbsolutePathBuf;
+    use codex_utils_home_dir::HomeSource;
+    use codex_utils_home_dir::ResolvedProductHome;
+    let root = tempfile::tempdir().expect("home");
+    let state = root.path().join("app-server-daemon");
+    std::fs::create_dir(&state).expect("state directory");
+    let owner = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(state.join("daemon.lock"))
+        .expect("owner lock");
+    owner.lock().expect("live owner");
+    let home = ResolvedProductHome {
+        path: AbsolutePathBuf::from_absolute_path(root.path()).expect("absolute"),
+        source: HomeSource::CodexHomeCompatibility,
+    };
+    assert_eq!(
+        super::acquire_home_write_guard(&home)
+            .expect_err("live stock owner")
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    drop(owner);
+    super::acquire_home_write_guard(&home).expect("stale lock is safe");
+}

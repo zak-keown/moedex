@@ -127,6 +127,23 @@ impl PidBackend {
                 }
             }
         }
+        // This is a same-host child. Preserve the home selected by the parent,
+        // including relative overrides, before Windows changes the working directory.
+        let home = self
+            .pid_file
+            .parent()
+            .and_then(std::path::Path::parent)
+            .context("daemon pid path has no product home")?;
+        let home = std::path::absolute(home)?;
+        command.env(
+            codex_product_identity::PRODUCT_IDENTITY.primary_home_env,
+            &home,
+        );
+        // Older managed binaries only understand the compatibility variable.
+        command.env(
+            codex_product_identity::PRODUCT_IDENTITY.compatibility_home_env,
+            &home,
+        );
         if let Some((key, value)) = self.command_env() {
             command.env(key, value);
         }
@@ -149,7 +166,6 @@ impl PidBackend {
             use windows_sys::Win32::System::Threading::DETACHED_PROCESS;
             // Preserve process-scoped paths before changing cwd; CA names match CUSTOM_CA_ENV_KEYS.
             for name in [
-                "CODEX_HOME",
                 "CODEX_SQLITE_HOME",
                 "CODEX_CA_CERTIFICATE",
                 "SSL_CERT_FILE",
