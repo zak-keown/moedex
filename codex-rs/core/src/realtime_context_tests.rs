@@ -341,3 +341,36 @@ async fn recent_work_section_groups_threads_by_cwd() {
     assert!(section.contains(&format!("### Directory: {}", outside.display())));
     assert!(section.contains(&format!("- {}: Inspect flaky test", outside.display())));
 }
+
+#[test]
+fn startup_context_log_omits_content() {
+    let buffer: &'static std::sync::Mutex<Vec<u8>> =
+        Box::leak(Box::new(std::sync::Mutex::new(Vec::new())));
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(tracing_test::internal::MockWriter::new(buffer))
+        .finish();
+    let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+
+    super::log_startup_context_built("SECRET-THREAD-CONTENT token=abc123 /Users/someone/private");
+
+    let logs = String::from_utf8(
+        buffer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone(),
+    )
+    .expect("startup context log should be valid utf-8");
+    // A size breadcrumb is logged; the rendered blob (which can carry other
+    // threads' chat text, personal paths, and credentials) is not.
+    assert!(logs.contains("realtime startup context built"));
+    assert!(
+        !logs.contains("SECRET-THREAD-CONTENT"),
+        "startup context content must not be logged: {logs}"
+    );
+    assert!(
+        !logs.contains("token=abc123"),
+        "startup context content must not be logged: {logs}"
+    );
+}

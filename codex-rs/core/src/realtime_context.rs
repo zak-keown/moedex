@@ -56,6 +56,18 @@ const NOISY_DIR_NAMES: &[&str] = &[
     "target",
 ];
 
+/// Log that the realtime startup context was built, WITHOUT its content. The
+/// blob can include other threads'/projects' chat text, personal directory
+/// names, and (per this module's risk model) credentials; `codex_core` logs are
+/// captured into the feedback ring buffer and log DB by default, so only its
+/// size is recorded here. Detailed sizes/flags are already logged at `debug!`.
+fn log_startup_context_built(context: &str) {
+    info!(
+        bytes = context.len(),
+        "realtime startup context built (content omitted)"
+    );
+}
+
 pub(crate) async fn build_realtime_startup_context(
     sess: &Session,
     budget_tokens: usize,
@@ -123,7 +135,7 @@ pub(crate) async fn build_realtime_startup_context(
         has_workspace_section,
         "built realtime startup context"
     );
-    info!("realtime startup context: {context}");
+    log_startup_context_built(&context);
     Some(context)
 }
 
