@@ -146,6 +146,12 @@ struct PendingCallbackEntry {
     verification_owner: Option<ConnectionId>,
     verification_auth_revision: Option<u64>,
     verification_identity: Option<user_verification_auth::Identity>,
+    /// The connections this request was actually addressed to. `None` means it
+    /// was broadcast to every connection, so any of them may resolve it; `Some`
+    /// means only a connection in the set may. Request ids are a guessable
+    /// process-wide counter, so without this any connected client could forge a
+    /// response for another connection's pending approval.
+    target_connections: Option<HashSet<ConnectionId>>,
     callback: oneshot::Sender<ClientRequestResult>,
     thread_id: Option<ThreadId>,
     request: ServerRequest,
@@ -376,6 +382,8 @@ impl OutgoingMessageSender {
         } else {
             connection_ids
         };
+        let target_connections =
+            connection_ids.map(|ids| ids.iter().copied().collect::<HashSet<ConnectionId>>());
         {
             let mut request_id_to_callback = self.request_id_to_callback.lock().await;
             request_id_to_callback.insert(
@@ -384,6 +392,7 @@ impl OutgoingMessageSender {
                     verification_owner,
                     verification_auth_revision,
                     verification_identity: verification_identity.clone(),
+                    target_connections,
                     callback: tx_approve,
                     thread_id,
                     request: request.clone(),
@@ -452,7 +461,26 @@ impl OutgoingMessageSender {
         connection_id: ConnectionId,
         thread_id: ThreadId,
     ) {
-        let requests = self.pending_requests_for_thread(thread_id).await;
+        let requests = {
+            let mut callbacks = self.request_id_to_callback.lock().await;
+            let mut requests = callbacks
+                .values_mut()
+                .filter(|entry| {
+                    entry.thread_id == Some(thread_id) && entry.verification_owner.is_none()
+                })
+                .map(|entry| {
+                    // The connection resuming this thread legitimately receives
+                    // the replayed request (thread ids are unguessable UUIDs),
+                    // so authorize it to resolve the request too.
+                    if let Some(targets) = entry.target_connections.as_mut() {
+                        targets.insert(connection_id);
+                    }
+                    entry.request.clone()
+                })
+                .collect::<Vec<_>>();
+            requests.sort_by(|left, right| left.id().cmp(right.id()));
+            requests
+        };
         for request in requests {
             if let Err(err) = self
                 .sender
@@ -579,6 +607,13 @@ impl OutgoingMessageSender {
                 callbacks.remove(id);
                 return None;
             }
+        } else if let Some(targets) = &entry.target_connections
+            && !targets.contains(&connection_id)
+        {
+            // A request addressed to specific connections may only be resolved
+            // by one of those connections. Otherwise any connected client could
+            // forge a response for another connection's guessable request id.
+            return None;
         }
         callbacks.remove_entry(id)
     }
@@ -1495,6 +1530,113 @@ mod tests {
             .expect("wait should not time out")
             .expect("waiter should receive a callback");
         assert_eq!(result, Err(error));
+    }
+
+    #[tokio::test]
+    async fn non_target_connection_cannot_resolve_targeted_request() {
+        let (tx, _rx) = mpsc::channel::<OutgoingEnvelope>(8);
+        let outgoing = Arc::new(OutgoingMessageSender::new(
+            tx,
+            codex_analytics::AnalyticsEventsClient::disabled(),
+        ));
+        let thread_id = ThreadId::new();
+        let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
+            outgoing.clone(),
+            vec![ConnectionId(1)],
+            thread_id,
+        );
+
+        // A thread-scoped approval request is addressed only to ConnectionId(1).
+        let (request_id, mut waiter) = thread_outgoing
+            .send_request(ServerRequestPayload::FileChangeRequestApproval(
+                FileChangeRequestApprovalParams {
+                    thread_id: thread_id.to_string(),
+                    turn_id: "turn-1".to_string(),
+                    item_id: "call-1".to_string(),
+                    started_at_ms: 0,
+                    reason: None,
+                    grant_root: None,
+                },
+            ))
+            .await;
+
+        // Request ids are a guessable process-wide counter, so a second,
+        // unrelated connection tries to forge both an error and an approval for
+        // the same id. Neither may resolve the original caller's callback.
+        outgoing
+            .notify_client_error(ConnectionId(2), request_id.clone(), internal_error("forged"))
+            .await;
+        assert_eq!(waiter.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+
+        outgoing
+            .notify_client_response(
+                ConnectionId(2),
+                request_id.clone(),
+                json!({ "decision": "approved" }),
+            )
+            .await;
+        assert_eq!(waiter.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+
+        // The connection the request was actually sent to can still resolve it.
+        outgoing
+            .notify_client_response(
+                ConnectionId(1),
+                request_id,
+                json!({ "decision": "approved" }),
+            )
+            .await;
+        let result = timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("waiter should resolve")
+            .expect("waiter should receive a callback");
+        assert_eq!(result, Ok(json!({ "decision": "approved" })));
+    }
+
+    #[tokio::test]
+    async fn replayed_connection_can_resolve_targeted_request() {
+        let (tx, _rx) = mpsc::channel::<OutgoingEnvelope>(8);
+        let outgoing = Arc::new(OutgoingMessageSender::new(
+            tx,
+            codex_analytics::AnalyticsEventsClient::disabled(),
+        ));
+        let thread_id = ThreadId::new();
+        let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
+            outgoing.clone(),
+            vec![ConnectionId(1)],
+            thread_id,
+        );
+
+        let (request_id, waiter) = thread_outgoing
+            .send_request(ServerRequestPayload::FileChangeRequestApproval(
+                FileChangeRequestApprovalParams {
+                    thread_id: thread_id.to_string(),
+                    turn_id: "turn-1".to_string(),
+                    item_id: "call-1".to_string(),
+                    started_at_ms: 0,
+                    reason: None,
+                    grant_root: None,
+                },
+            ))
+            .await;
+
+        // A connection that resumes the thread (thread ids are unguessable
+        // UUIDs) is replayed the pending request and must be authorized to
+        // resolve it, even though it was not in the original target set.
+        outgoing
+            .replay_requests_to_connection_for_thread(ConnectionId(2), thread_id)
+            .await;
+        outgoing
+            .notify_client_response(
+                ConnectionId(2),
+                request_id,
+                json!({ "decision": "approved" }),
+            )
+            .await;
+        let result = timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("waiter should resolve")
+            .expect("waiter should receive a callback");
+        assert_eq!(result, Ok(json!({ "decision": "approved" })));
     }
 
     #[tokio::test]
