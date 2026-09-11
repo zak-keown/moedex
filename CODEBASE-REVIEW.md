@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 26
+  fixed: 27
   stale: 0
   skipped: 1
   deferred: 6
-  open: 227
+  open: 226
 ---
 
 # Codebase Review — moedex
@@ -775,6 +775,10 @@ Concretely: a skill file (which can come from a shared/untrusted marketplace or 
 
 Fix: include the resolved transport target (command with args, or URL) in the confirmation question/description shown to the user, not just the dependency's self-reported display name.
 
+**Disposition:** fixed
+**Commit:** `09028f5b15`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-020: Full realtime startup context logged at `info!`, captured unconditionally into persistent/feedback logs
 **File:** `codex-rs/core/src/realtime_context.rs`
 **Anchor:** `info!("realtime startup context: {context}");` in `build_realtime_startup_context`
