@@ -53,7 +53,7 @@ Blank variables are treated as unset. An invalid explicit path fails instead of 
 Stock Codex data is never migrated automatically. Preview an explicit, copy-only import first:
 
 ```shell
-moedex import codex --dry-run
+moedex import codex --dry-run --settings --sessions
 ```
 
 Then select only the categories you want:
