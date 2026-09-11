@@ -10,6 +10,31 @@ const PROXY_ENV_VARS: &[&str] = &[
     "all_proxy",
 ];
 
+/// Redact secrets from a proxy env-var value before it is placed in a feedback
+/// diagnostic (which is uploaded to Sentry). Proxy URLs commonly embed HTTP
+/// Basic-Auth credentials (`http://user:pass@host`) or tokens in the query
+/// string (`?token=...`); strip userinfo and any query/fragment while keeping
+/// scheme://host:port/path so the diagnostic stays useful. Values that are not
+/// URLs (no `://`) pass through unchanged. Mirrors the codebase's existing URL
+/// redaction convention (`login::redact_sensitive_url_parts`,
+/// `doctor::redact_url_token`) for this data class.
+fn redact_proxy_value(value: &str) -> String {
+    // Drop query and fragment, which can carry tokens.
+    let without_query = value.split(['?', '#']).next().unwrap_or(value);
+    let Some(scheme_end) = without_query.find("://") else {
+        return without_query.to_string();
+    };
+    let (scheme, rest) = without_query.split_at(scheme_end + 3);
+    let (authority, path) = match rest.find('/') {
+        Some(index) => rest.split_at(index),
+        None => (rest, ""),
+    };
+    match authority.rfind('@') {
+        Some(at) => format!("{scheme}***@{}{path}", &authority[at + 1..]),
+        None => format!("{scheme}{authority}{path}"),
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FeedbackDiagnostics {
     diagnostics: Vec<FeedbackDiagnostic>,
@@ -46,7 +71,7 @@ impl FeedbackDiagnostics {
             .iter()
             .filter_map(|key| {
                 let value = env.get(*key)?;
-                Some(format!("{key} = {value}"))
+                Some(format!("{key} = {}", redact_proxy_value(value)))
             })
             .collect::<Vec<_>>();
         if !proxy_details.is_empty() {
@@ -96,7 +121,7 @@ mod tests {
     use super::FeedbackDiagnostics;
 
     #[test]
-    fn collect_from_pairs_reports_raw_values_and_attachment() {
+    fn collect_from_pairs_redacts_credentials_and_reports_attachment() {
         let diagnostics = FeedbackDiagnostics::collect_from_pairs([
             (
                 "HTTPS_PROXY",
@@ -106,6 +131,9 @@ mod tests {
             ("all_proxy", "socks5h://all-proxy.example.com:1080"),
         ]);
 
+        // Userinfo and query (which can carry credentials/tokens) are redacted;
+        // scheme/host/port and credential-free values are preserved. This text
+        // is uploaded to Sentry, so it must not carry secrets.
         assert_eq!(
             diagnostics,
             FeedbackDiagnostics {
@@ -114,8 +142,7 @@ mod tests {
                         .to_string(),
                     details: vec![
                         "http_proxy = proxy.example.com:8080".to_string(),
-                        "HTTPS_PROXY = https://user:password@secure-proxy.example.com:443?secret=1"
-                            .to_string(),
+                        "HTTPS_PROXY = https://***@secure-proxy.example.com:443".to_string(),
                         "all_proxy = socks5h://all-proxy.example.com:1080".to_string(),
                     ],
                 },],
@@ -129,7 +156,7 @@ mod tests {
 
 - Proxy environment variables are set and may affect connectivity.
   - http_proxy = proxy.example.com:8080
-  - HTTPS_PROXY = https://user:password@secure-proxy.example.com:443?secret=1
+  - HTTPS_PROXY = https://***@secure-proxy.example.com:443
   - all_proxy = socks5h://all-proxy.example.com:1080"#
                     .to_string()
             )
@@ -144,7 +171,9 @@ mod tests {
     }
 
     #[test]
-    fn collect_from_pairs_preserves_whitespace_and_empty_values() {
+    fn collect_from_pairs_preserves_whitespace_in_non_url_values() {
+        // Values that are not URLs (no `://`) carry no userinfo/query to redact,
+        // so they pass through unchanged, whitespace and all.
         let diagnostics =
             FeedbackDiagnostics::collect_from_pairs([("HTTP_PROXY", "  proxy with spaces  ")]);
 
@@ -161,7 +190,8 @@ mod tests {
     }
 
     #[test]
-    fn collect_from_pairs_reports_values_verbatim() {
+    fn collect_from_pairs_reports_non_url_values_verbatim() {
+        // Non-URL values are reported verbatim; only URL userinfo/query is redacted.
         let proxy_value = "not a valid proxy";
         let diagnostics = FeedbackDiagnostics::collect_from_pairs([("HTTP_PROXY", proxy_value)]);
 
@@ -174,6 +204,30 @@ mod tests {
                     details: vec!["HTTP_PROXY = not a valid proxy".to_string()],
                 },],
             }
+        );
+    }
+
+    #[test]
+    fn redact_proxy_value_strips_userinfo_and_query() {
+        use super::redact_proxy_value;
+
+        assert_eq!(
+            redact_proxy_value("https://user:password@secure-proxy.example.com:443?secret=1"),
+            "https://***@secure-proxy.example.com:443"
+        );
+        assert_eq!(
+            redact_proxy_value("http://user:pass@proxy.example.com:8080/path?token=abc"),
+            "http://***@proxy.example.com:8080/path"
+        );
+        // No userinfo: scheme/host/port kept, query dropped.
+        assert_eq!(
+            redact_proxy_value("socks5h://all-proxy.example.com:1080?x=1"),
+            "socks5h://all-proxy.example.com:1080"
+        );
+        // No scheme: passed through unchanged.
+        assert_eq!(
+            redact_proxy_value("proxy.example.com:8080"),
+            "proxy.example.com:8080"
         );
     }
 }
