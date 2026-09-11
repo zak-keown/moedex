@@ -33,13 +33,34 @@ BASE_FORBIDDEN = re.compile(
     r"another Codex process|~[/\\]\.codex[/\\]config\.toml)"
 )
 TUI_FORBIDDEN = re.compile(
-    r"(?i)(?:(?:`|')codex (?:app|mcp|resume|fork)\b|\bcodex -[a-z]\b|"
+    r"(?i)(?:(?-i:\bcodex) (?:(?:app|mcp|resume|fork|exec|login|doctor|app-server)\b|"
+    r"--[a-z][a-z0-9-]*\b|-[a-z]\b)|"
     r"\bCodex (?:CLI|service|application|binary|client|agent|can|could|will|asks|"
     r"performs|process|copies|now uses|may add|is currently|just got)\b|"
     r"\bcodex (?:could|to|network access)\b|"
     r"\b(?:ask|tell|grant|restart|run|exit|using|start|starting) Codex\b|"
     r"(?-i:[\"']Codex[\"']))"
 )
+TUI_ALLOWED = (
+    re.compile(r"\bOpenAI Codex\b"),
+    re.compile(r"\bCodex (?:extension|Cloud|Desktop|community forum)\b"),
+    re.compile(r"\bCodex keymap documentation\b"),
+    re.compile(r"\bCodex App (?:directives|avatar catalog)\b"),
+    re.compile(r"\bCodex-optimized\b"),
+    re.compile(r"\bCodex is included in your plan\b"),
+    re.compile(r"(?:~[/\\])?\.codex[/\\]config\.toml"),
+    re.compile(r"\bcodex home (?:path|directory|file)\b", re.IGNORECASE),
+)
+
+
+def tui_forbidden() -> tuple[re.Pattern[str], ...]:
+    return (BASE_FORBIDDEN, TUI_FORBIDDEN)
+
+
+def without_tui_allowances(line: str) -> str:
+    for pattern in TUI_ALLOWED:
+        line = pattern.sub("", line)
+    return line
 
 
 def public_surfaces() -> list[Path]:
@@ -67,18 +88,59 @@ def production_lines(path: Path) -> list[str]:
 
 
 class PublicBrandInventoryTest(unittest.TestCase):
+    def test_tui_pattern_rejects_public_stock_command_leaks(self) -> None:
+        leaks = (
+            "Run codex resume to continue.",
+            "Use codex exec for automation.",
+            "Run codex login first.",
+            "Try codex doctor for diagnostics.",
+            "Start codex app-server locally.",
+            "Launch codex --profile work.",
+            "Select one with codex -m gpt-5.5.",
+            "The Codex config could not be loaded.",
+        )
+        for line in leaks:
+            with self.subTest(line=line):
+                self.assertTrue(
+                    any(pattern.search(line) for pattern in tui_forbidden())
+                )
+
+    def test_tui_pattern_allows_compatibility_and_upstream_terms(self) -> None:
+        allowed = (
+            "OpenAI Codex",
+            "Codex extension",
+            "Codex Cloud task",
+            "Codex Desktop protocol",
+            "Codex-optimized model",
+            "Codex is included in your plan",
+            "[tui.keymap] in ~/.codex/config.toml",
+            "See the Codex keymap documentation",
+            "Codex App directives",
+            "codex home path",
+        )
+        for line in allowed:
+            with self.subTest(line=line):
+                public_text = without_tui_allowances(line)
+                self.assertFalse(
+                    any(pattern.search(public_text) for pattern in tui_forbidden())
+                )
+
     def test_moedex_public_surfaces_do_not_leak_stock_product_names(self) -> None:
         leaks: list[str] = []
         for path in public_surfaces():
             relative = path.relative_to(REPO_ROOT)
             forbidden = (
-                TUI_FORBIDDEN
+                tui_forbidden()
                 if str(relative).startswith("codex-rs/tui/")
-                else BASE_FORBIDDEN
+                else (BASE_FORBIDDEN,)
             )
             for line_number, line in enumerate(production_lines(path), 1):
-                if match := forbidden.search(line):
-                    leaks.append(f"{relative}:{line_number}: {match.group(0)}")
+                if str(relative).startswith("codex-rs/tui/"):
+                    line = without_tui_allowances(line)
+                for pattern in forbidden:
+                    if match := pattern.search(line):
+                        leaks.append(f"{relative}:{line_number}: {match.group(0)}")
+                        break
         self.assertEqual(leaks, [])
 
 
