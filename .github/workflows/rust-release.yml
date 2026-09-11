@@ -1607,6 +1607,46 @@ jobs:
             --app-server-symbols-archive "${GITHUB_WORKSPACE}/package-artifacts/codex-symbols-${{ matrix.app_server_artifact }}.tar.gz" \
             test_codex_package.py test_symbol_archives.py
 
+      - name: Verify behavior manifest against release packages
+        shell: bash
+        run: |
+          fork_commit="$(git rev-parse HEAD)"
+          python3 - <<'PY'
+          import tarfile
+          from pathlib import Path
+
+          root = Path("behavior-artifacts")
+          archives = {
+              "cli": Path("package-artifacts/codex-package-${{ matrix.target }}.tar.gz"),
+              "app-server": Path("package-artifacts/codex-app-server-package-${{ matrix.target }}.tar.gz"),
+          }
+          for name, archive in archives.items():
+              destination = root / name
+              destination.mkdir(parents=True, exist_ok=True)
+              with tarfile.open(archive, "r:gz") as package:
+                  package.extractall(destination, filter="data")
+          PY
+          python3 scripts/moedex_behavior_manifest.py evidence \
+            --artifact-dir behavior-artifacts \
+            --target "${{ matrix.target }}" \
+            --channel github \
+            --fork-commit "${fork_commit}" \
+            --archive "package-artifacts/codex-package-${{ matrix.target }}.tar.gz" \
+            --archive "package-artifacts/codex-app-server-package-${{ matrix.target }}.tar.gz" \
+            --archive "package-artifacts/codex-symbols-${{ matrix.target }}.tar.gz" \
+            --archive "package-artifacts/codex-symbols-${{ matrix.app_server_artifact }}.tar.gz" \
+            --passed-gate release-package-smoke \
+            --passed-gate release-symbol-smoke \
+            --passed-gate behavior-artifacts \
+            --output "behavior-evidence/moedex-${{ matrix.target }}.json"
+
+      - name: Retain behavior qualification evidence
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: moedex-behavior-evidence-${{ matrix.target }}
+          path: behavior-evidence/moedex-${{ matrix.target }}.json
+          if-no-files-found: error
+
   stage-npm-packages:
     name: stage npm packages
     needs:

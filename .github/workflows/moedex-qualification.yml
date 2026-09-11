@@ -1,0 +1,106 @@
+name: moedex-qualification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavior-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.3"
+      - name: Validate manifest and source inventory
+        run: python3 scripts/moedex_behavior_manifest.py verify
+      - name: Exercise behavior-contract mutations
+        run: uv run --with pytest pytest -q scripts/test_moedex_behavior_manifest.py
+      - name: Check workflow syntax
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$(go env GOPATH)/bin/actionlint" \
+            .github/workflows/moedex-qualification.yml \
+            .github/workflows/rust-release.yml
+
+  upstream-base:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.3"
+      - name: Fetch upstream history without changing the checkout
+        run: git fetch --no-tags https://github.com/openai/codex.git main
+      - name: Verify recorded base and rebase mutation guards
+        env:
+          UPSTREAM_BASE: 8e2afc09126c0cea4c282725fe68af43adad73d7
+        run: |
+          git cat-file -e "${UPSTREAM_BASE}^{commit}"
+          git merge-base --is-ancestor "${UPSTREAM_BASE}" FETCH_HEAD
+          uv run --with pytest pytest -q scripts/test_moedex_behavior_manifest.py \
+            -k 'upstream_rebase_mutations or source_inventory'
+
+  focused-rust-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - name: Identity, home, build, and diagnostics
+        run: >-
+          python3 scripts/moedex_behavior_manifest.py run-gates
+          --gate identity --gate home --gate build-info --gate diagnostics
+      - name: Credential, daemon, transport, and exec isolation
+        run: >-
+          python3 scripts/moedex_behavior_manifest.py run-gates
+          --gate login --gate secrets --gate app-server-daemon
+          --gate app-server-transport --gate exec-server
+      - name: Protocol, rollout, and import compatibility
+        run: >-
+          python3 scripts/moedex_behavior_manifest.py run-gates
+          --gate app-server-protocol --gate rollout --gate import
+      - name: Public CLI and TUI identity
+        run: >-
+          python3 scripts/moedex_behavior_manifest.py run-gates
+          --gate cli --gate tui --gate model-identity
+
+  package-and-installers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.3"
+      - name: Package and Unix installer tests
+        run: |
+          uv run --with pytest pytest -q \
+            scripts/codex_package/test_layout.py \
+            scripts/codex_package/test_release_workflows.py \
+            scripts/install/test_install_sh.py
+      - name: PowerShell installer tests
+        shell: pwsh
+        run: uv run --with pytest pytest -q scripts/install/test_install_ps1.py

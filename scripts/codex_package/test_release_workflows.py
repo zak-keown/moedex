@@ -77,6 +77,20 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertNotIn("provisioned-macos-candidate", qualification)
         self.assertIn("needs.qualify-release-packages.result == 'success'", unix)
 
+    def test_release_qualification_retains_behavior_evidence_per_target(self) -> None:
+        unix = UNIX_WORKFLOW.read_text()
+        qualification = unix.split("\n  qualify-release-packages:\n", 1)[1].split(
+            "\n  stage-npm-packages:\n", 1
+        )[0]
+
+        self.assertIn("moedex_behavior_manifest.py evidence", qualification)
+        self.assertIn("--artifact-dir behavior-artifacts", qualification)
+        self.assertIn('fork_commit="$(git rev-parse HEAD)"', qualification)
+        self.assertIn('--fork-commit "${fork_commit}"', qualification)
+        self.assertIn("--channel github", qualification)
+        self.assertEqual(qualification.count("--archive"), 4)
+        self.assertIn("moedex-behavior-evidence-${{ matrix.target }}", qualification)
+
     def test_default_build_has_no_oidc_permission_or_cosign_step(self) -> None:
         unix = UNIX_WORKFLOW.read_text()
         build = unix.split("\n  build:\n", 1)[1].split("\n  build-macos-voice:\n", 1)[0]
