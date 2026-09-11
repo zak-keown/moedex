@@ -1,0 +1,465 @@
+{
+  "schemaVersion": 1,
+  "product": "Moedex",
+  "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+  "gates": {
+    "manifest": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "scripts/moedex_behavior_manifest.py",
+        "verify"
+      ]
+    },
+    "identity": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-product-identity"
+      ]
+    },
+    "home": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-utils-home-dir"
+      ]
+    },
+    "build-info": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-build-info"
+      ]
+    },
+    "login": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-login",
+        "auth::storage_tests"
+      ]
+    },
+    "secrets": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-secrets"
+      ]
+    },
+    "app-server-daemon": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-app-server-daemon"
+      ]
+    },
+    "app-server-transport": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-app-server-transport"
+      ]
+    },
+    "app-server-protocol": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-app-server-protocol"
+      ]
+    },
+    "diagnostics": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-diagnostics"
+      ]
+    },
+    "exec-server": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-exec-server"
+      ]
+    },
+    "rollout": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-rollout"
+      ]
+    },
+    "import": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-external-agent-migration"
+      ]
+    },
+    "cli": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-cli",
+        "clap_command_is_moedex"
+      ]
+    },
+    "tui": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--lib"
+      ]
+    },
+    "model-identity": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-core",
+        "--test",
+        "all",
+        "product_identity::moedex_identity_is_added_once_without_rewriting_resumed_history",
+        "--",
+        "--exact"
+      ]
+    },
+    "package-unit": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "scripts/codex_package/test_layout.py",
+        "scripts/codex_package/test_release_workflows.py"
+      ]
+    },
+    "install-unix": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "scripts/install/test_install_sh.py"
+      ]
+    },
+    "install-windows": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "scripts/install/test_install_ps1.py"
+      ]
+    }
+  },
+  "requirements": [
+    {
+      "id": "B1",
+      "requirement": "The public executable and generated command surfaces are named moedex.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "cli"
+      ],
+      "artifacts": [
+        {
+          "paths": [
+            "cli/bin/moedex",
+            "cli/bin/moedex.exe"
+          ],
+          "executable": true
+        }
+      ],
+      "exclusions": [
+        "Internal codex-* crate and helper names remain compatibility identifiers."
+      ]
+    },
+    {
+      "id": "B2",
+      "requirement": "User-visible application identity is Moedex with retained upstream attribution.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "cli",
+        "tui"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "OpenAI, ChatGPT, Codex Cloud, and model names remain provider or upstream labels."
+      ]
+    },
+    {
+      "id": "B3",
+      "requirement": "Home precedence is MOEDEX_HOME, CODEX_HOME compatibility, then ~/.moedex.",
+      "status": "superseded",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "home",
+        "diagnostics"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "Repository-local .codex configuration retains its compatibility name."
+      ]
+    },
+    {
+      "id": "B4",
+      "requirement": "Same-host runtime state is isolated while remote hosts resolve their own home.",
+      "status": "superseded",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "app-server-daemon",
+        "app-server-transport",
+        "exec-server"
+      ],
+      "artifacts": [
+        {
+          "paths": [
+            "cli/bin/codex-code-mode-host",
+            "cli/bin/codex-code-mode-host.exe"
+          ],
+          "executable": true
+        }
+      ],
+      "exclusions": [
+        "Remote filesystem paths are host-local and are not asserted by archive layout."
+      ]
+    },
+    {
+      "id": "B5",
+      "requirement": "Codex import is explicit, preview-first, copy-only, and credentials default off.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "import"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "First-launch prompting is deferred; the explicit import command is the supported entrypoint."
+      ]
+    },
+    {
+      "id": "B6",
+      "requirement": "Settings and sessions import through typed and rollout-aware adapters.",
+      "status": "superseded",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "import",
+        "rollout"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "Unsupported source items are reported and excluded rather than rewritten."
+      ]
+    },
+    {
+      "id": "B7",
+      "requirement": "Credentials use Moedex-owned storage and migrate only through storage adapters.",
+      "status": "superseded",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "login",
+        "secrets",
+        "import"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "Provider credential formats and sign-in names remain provider-owned."
+      ]
+    },
+    {
+      "id": "B8",
+      "requirement": "Updates and install guidance use the zak-keown/moedex GitHub release channel.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "package-unit",
+        "install-unix",
+        "install-windows"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "npm, Homebrew, WinGet, R2, and upstream documentation publication are disabled channels."
+      ]
+    },
+    {
+      "id": "B9",
+      "requirement": "Release archives are complete, checksummed, provenance-bound, and qualified on six targets.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "package-unit"
+      ],
+      "artifacts": [
+        {
+          "paths": [
+            "cli/codex-package.json"
+          ],
+          "executable": false
+        },
+        {
+          "paths": [
+            "app-server/codex-package.json"
+          ],
+          "executable": false
+        }
+      ],
+      "exclusions": [
+        "Signing and publication require separate protected release gates."
+      ]
+    },
+    {
+      "id": "B10",
+      "requirement": "Version output leads with Moedex and retains fork and upstream provenance.",
+      "status": "preserved",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "identity",
+        "build-info"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "Protocol compatibility versions retain their established Codex field names."
+      ]
+    },
+    {
+      "id": "B11",
+      "requirement": "Protocol, rollout, transport, exec-server, and app-server compatibility are preserved.",
+      "status": "preserved",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "app-server-protocol",
+        "app-server-transport",
+        "exec-server",
+        "rollout"
+      ],
+      "artifacts": [
+        {
+          "paths": [
+            "app-server/bin/codex-app-server",
+            "app-server/bin/codex-app-server.exe"
+          ],
+          "executable": true
+        }
+      ],
+      "exclusions": [
+        "Internal wire methods, fields, helper names, and rollout records remain Codex-compatible."
+      ]
+    },
+    {
+      "id": "B12",
+      "requirement": "Model-visible identity says Moedex exactly once across fresh and resumed sessions.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "model-identity"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "Historical rollout bytes and truthful provider names are preserved."
+      ]
+    },
+    {
+      "id": "B13",
+      "requirement": "Install and uninstall coexist with stock Codex and preserve both products data.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "install-unix",
+        "install-windows"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "Data deletion is a separate manual action after effective-home confirmation."
+      ]
+    },
+    {
+      "id": "U4",
+      "requirement": "Fork-only identity and state changes preserve provider and protocol semantics.",
+      "status": "preserved",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "app-server-protocol",
+        "secrets",
+        "rollout"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "Fork branding does not rename provider or compatibility contracts."
+      ]
+    },
+    {
+      "id": "U5",
+      "requirement": "Qualification detects mapped behavior loss and upstream update-channel adoption.",
+      "status": "preserved",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "manifest"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "Upstream attribution and compatibility references are allowed outside update/publication targets."
+      ]
+    }
+  ],
+  "sourceInventory": {
+    "files": [
+      "codex-cli/bin/codex.js",
+      "scripts/install/install.sh",
+      "scripts/install/install.ps1",
+      "codex-rs/tui/src/updates.rs",
+      "codex-rs/tui/src/update_action.rs",
+      "codex-rs/product-identity/src/lib.rs"
+    ],
+    "expectations": [
+      {
+        "literal": "github.com/zak-keown/moedex",
+        "count": 4
+      },
+      {
+        "literal": "api.github.com/repos/zak-keown/moedex",
+        "count": 5
+      },
+      {
+        "literal": "@zak-keown/moedex",
+        "count": 14
+      }
+    ],
+    "forbiddenRegex": [
+      "https?://(?:api\\\\.)?github\\\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)",
+      "(?:npm\\\\s+install|pnpm\\\\s+add|bun\\\\s+install|vp\\\\s+install)[^\\\\n]*@openai/codex",
+      "formulae\\\\.brew\\\\.sh/(?:api/)?cask/codex"
+    ]
+  }
+}
