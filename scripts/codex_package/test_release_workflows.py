@@ -57,6 +57,28 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn("MOEDEX_RELEASE_CHANNEL=github", script)
         self.assertIn("MOEDEX_REQUIRE_PROVENANCE=1", script)
 
+    def test_default_release_qualifies_built_archives_with_smoke_suite(self) -> None:
+        unix = UNIX_WORKFLOW.read_text()
+        qualification = unix.split("\n  qualify-release-packages:\n", 1)[1].split(
+            "\n  stage-npm-packages:\n", 1
+        )[0]
+
+        self.assertIn("qualify-release-packages:", unix)
+        self.assertIn("scripts/codex_package/smoke_tests", qualification)
+        self.assertIn("sdk/python/tests", qualification)
+        self.assertIn("--cli-archive", qualification)
+        self.assertIn("--app-server-archive", qualification)
+        self.assertIn("test_missing_required_helper_fails_qualification", qualification)
+        self.assertNotIn("provisioned-macos-candidate", qualification)
+        self.assertIn("needs.qualify-release-packages.result == 'success'", unix)
+
+    def test_default_build_has_no_oidc_permission_or_cosign_step(self) -> None:
+        unix = UNIX_WORKFLOW.read_text()
+        build = unix.split("\n  build:\n", 1)[1].split("\n  build-macos-voice:\n", 1)[0]
+
+        self.assertNotIn("id-token: write", build)
+        self.assertNotIn("linux-code-sign", build)
+
 
 if __name__ == "__main__":
     unittest.main()
