@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 17
+  fixed: 18
   stale: 0
   skipped: 2
   deferred: 3
-  open: 238
+  open: 237
 ---
 
 # Codebase Review — moedex
@@ -703,6 +703,10 @@ Fix: after checkout, call `git rev-parse HEAD` (already done via `git_worktree_r
 the original `ref_name` was a full SHA, require it to match before treating the clone as
 successfully activated — mirroring `loader.rs`'s check.
 
+**Disposition:** fixed
+**Commit:** `8cd90e558b`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-018: Recommended-plugin names/ids are embedded unescaped, allowing a malicious marketplace listing to break out of the `<recommended_plugins>` wrapper
 **File:** `codex-rs/core/src/context/recommended_plugins_instructions.rs`
 **Anchor:** `RecommendedPluginsInstructions::body`
