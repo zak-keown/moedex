@@ -18,8 +18,8 @@ dispositions:
   fixed: 15
   stale: 0
   skipped: 1
-  deferred: 0
-  open: 244
+  deferred: 1
+  open: 243
 ---
 
 # Codebase Review — moedex
@@ -879,6 +879,10 @@ have a Windows machine to run `OpenProcess`/`DuplicateHandle` against a live tar
 confirm exploitability end-to-end, so this is a code-level trust-boundary finding rather than
 a verified working exploit.
 
+**Disposition:** deferred
+**Commit:** —
+**Resolved:** 2026-09-11
+**Note:** Premise confirmed on current tree: open_platform (exec-server/src/sandboxed_file_open.rs:98) calls duplicate_file_handle(response.process_id, response.file_handle) with the helper's self-reported process_id and never compares it to the spawned child's PID (child.id()). Real trust-boundary gap. Environment-blocked: this path is Windows-only and cannot be compiled or run on this macOS host (no windows target/SDK), so no red/green is possible here. Recommended fix (for a Windows-capable follow-up): capture child.id() in open_platform and reject the response unless response.process_id == child.id() before OpenProcess/DuplicateHandle.
 ### CR-024: History/Notes backend bypasses the configured outbound proxy and custom-CA policy
 **File:** `codex-rs/ext/history-notes/src/backend.rs`
 **Anchor:** `ReqwestTransport::from_http_client(create_client())`
