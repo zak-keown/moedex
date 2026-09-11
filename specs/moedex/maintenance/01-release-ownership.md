@@ -34,7 +34,7 @@ Produce complete, independently identifiable Moedex installation artifacts throu
 
 Extend brand-foundation Tasks 6–7 with these acceptance requirements; reuse their update/package/behavior-manifest ownership. Packaging and qualification can be implemented before public distribution exists. Initial operation produces local/CI artifacts only. Public publication remains separate from the existing plan's scope.
 
-Keep the previous validated package and immutable release evidence available for recovery. A pipeline rollback must retain fork destination isolation. Reverting workflow code must not reactivate OpenAI publishing jobs or require rewriting released assets.
+Keep the previous validated package and immutable release evidence available for recovery. A conforming recovery package must satisfy P5's remote telemetry removal contract; pre-removal binaries are not eligible rollback targets under this contract. A pipeline rollback must retain fork destination isolation. Reverting workflow code must not reactivate OpenAI publishing jobs or require rewriting released assets.
 
 ## Source anchors
 

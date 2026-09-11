@@ -14,7 +14,7 @@ The inspected source revision is `e772a65de55fa84e9faebf786cd1e2c6b50e447c`; its
 | P2 | [Portable CI](maintenance/02-portable-ci.md) | Verification runs on provisioned fork-accessible runners without OpenAI credentials |
 | P3 | [Primary verification path](maintenance/03-verification-path.md) | Cargo/nextest is the proposed primary PR path; Bazel compatibility remains exercised |
 | P4 | [Advisory argument-comment lint](maintenance/04-advisory-lint.md) | The readability convention remains, with enforcement outside the blocking correctness path |
-| P5 | [Telemetry defaults](maintenance/05-telemetry-defaults.md) | Local diagnostics remain available; outbound observability requires explicit configuration |
+| P5 | [Remote telemetry removal](maintenance/05-telemetry-defaults.md) | Remote telemetry and its settings are removed; local diagnostics remain available |
 | P6 | [Community automation](maintenance/06-community-automation.md) | Inherited community bots remain inactive without weakening build or dependency checks |
 
 ## Design choice
@@ -25,7 +25,7 @@ Cargo-first is a proposed policy choice, not a measured speed claim. P2/P3 requi
 
 ## Shared requirements
 
-- Preserve [SPEC.md](SPEC.md) and [BRAND.md](BRAND.md) identity, home isolation, provider authentication, protocol, rollout, and sandbox contracts. Retain internal `codex-*` names and attribution.
+- Preserve [SPEC.md](SPEC.md) and [BRAND.md](BRAND.md) identity, home isolation, provider authentication, functional protocol, rollout, and sandbox contracts. P5 explicitly removes remote telemetry configuration/API capabilities and requires those targeted compatibility changes to be inventoried. Retain internal `codex-*` names and attribution.
 - Never modify code related to `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` or `CODEX_SANDBOX_ENV_VAR`.
 - Keep integration coverage for changed agent logic, reviewed UI snapshots, schema drift checks, dependency checks, and package qualification. Tests must exercise behavior; do not add tests that merely assert static constants or deleted code is absent.
 - Preserve Linux, macOS, and Windows core support. Qualify each advertised release target; an unavailable runner is missing evidence, not a passing or silently excluded platform.
@@ -50,7 +50,7 @@ Re-check the manifest with `plan-set next --manifest docs/moe/plans/moedex-MANIF
 
 ## Decisions and prerequisites
 
-GitHub Releases first, advisory custom lint, disabled inherited bots, and explicit outbound telemetry are the proposed defaults. Public npm/Homebrew/WinGet/PyPI publication, operating a telemetry collector, changing external contribution acceptance, and provisioning signing accounts are outside the initial scope.
+GitHub Releases first, advisory custom lint, and disabled inherited bots are proposed defaults. Complete removal of remote telemetry and its settings is the user's explicit decision of 2026-09-11, superseding the earlier default-off/custom-exporter proposal. Public npm/Homebrew/WinGet/PyPI publication, changing external contribution acceptance, and provisioning signing accounts are outside the initial scope. Operating or configuring a remote telemetry collector is excluded from the product contract.
 
 Before activating P3, record successful hosted-runner trials and comparative CI costs; retain the old gate if the proposed one cannot meet coverage. Before claiming a release target, record its native package qualification and required signing state. Before any future public publication, resolve the actual credentials, release version, and publication authorization. None of these external prerequisites prevents reviewing or implementing locally testable portions of this specification.
 
