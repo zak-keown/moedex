@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 11
+  fixed: 12
   stale: 0
   skipped: 1
   deferred: 0
-  open: 248
+  open: 247
 ---
 
 # Codebase Review — moedex
@@ -1360,6 +1360,10 @@ This is not a hypothetical edge case: the crate's own tests explicitly opt into 
 
 Fix: either detect the runtime flavor and skip locking (falling through to the "outside a runtime" behavior) when running on a current-thread runtime, or use a non-blocking lock primitive (e.g. `std::sync::Mutex` / `parking_lot::Mutex`) instead of `tokio::sync::Mutex` + `block_in_place`, since nothing here actually needs to be `.await`-compatible — `blocking_lock` is used specifically to avoid that.
 
+**Disposition:** fixed
+**Commit:** `302910b5cf`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-038: Malformed NUL-device path breaks `allow_null_device` on every sandbox spawn path
 **File:** `codex-rs/windows-sandbox-rs/src/acl.rs`
 **Anchor:** `allow_null_device`, `to_wide(r"\\\\.\\NUL")`
