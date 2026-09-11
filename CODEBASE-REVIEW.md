@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 30
+  fixed: 31
   stale: 0
   skipped: 1
   deferred: 6
-  open: 223
+  open: 222
 ---
 
 # Codebase Review — moedex
@@ -942,6 +942,10 @@ a verified working exploit.
 
 `HistoryNotesBackend::call` builds its transport with `codex_login::default_client::create_client()`, which unconditionally takes the "transport default proxy" / built-in custom-CA-fallback path and never consults any `HttpClientFactory`/`OutboundProxyPolicy`. Compare this to `codex-rs/ext/guardian-v2/src/async_scorer/sampler/connection_pool.rs` in the same shard, which explicitly threads `self.config.http_client_factory.clone()` through `create_client_for_route_async(...)` so that a configured `OutboundProxyPolicy` (e.g. an enterprise PAC-resolved or custom proxy) is honored for every classifier request. `create_client()` only degenerates to the same behavior as the route-aware path when the factory's policy is the default (`OutboundProxyPolicy::ReqwestDefault`); for any other configured policy, `create_client_for_route` takes a materially different path (`build_respecting_outbound_proxy_policy`). Because `HistoryNotesBackend` never receives or uses a `HttpClientFactory` at all (grep confirms no reference to it in this crate), every `history.*`/`notes.*` tool call — read_file, write_file, append_to_file, search_contents, thread_hint, etc. — silently routes around an administrator's non-default outbound proxy configuration, unlike the primary model-request path and the guardian-v2 classifier. In an environment that relies on the proxy policy for egress control or TLS interception, this is a security control that does not hold for this extension's traffic. Fix: plumb `Config::http_client_factory()` (already available to `HistoryNotesExtension::update_config`, which has `&Config`) into `HistoryNotesBackend` and build the transport via `create_client_for_route`/`create_client_for_route_async`, mirroring the guardian-v2 connection pool.
 
+**Disposition:** fixed
+**Commit:** `4f3ca9458d`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-025: Image-generation backend bypasses the configured outbound proxy and custom-CA policy
 **File:** `codex-rs/ext/image-generation/src/backend.rs`
 **Anchor:** `ReqwestTransport::from_http_client(create_client())`
