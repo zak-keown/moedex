@@ -150,6 +150,21 @@ fn dangerous_command_match_for_exec(
     }
 }
 
+/// `env` flags that consume a value (the following argument, or an inline
+/// `--flag=value`). If these are not skipped along with their value, the
+/// wrapped command is misidentified and never inspected, letting e.g.
+/// `env -C /tmp rm -rf .` slip past the classifier.
+const ENV_VALUE_TAKING_FLAGS: &[&str] = &[
+    "-C",
+    "--chdir",
+    "-u",
+    "--unset",
+    "-S",
+    "--split-string",
+    "-a",
+    "--argv0",
+];
+
 fn dangerous_command_match_for_env(
     command: &[String],
     wrapper_depth: usize,
@@ -157,20 +172,54 @@ fn dangerous_command_match_for_env(
 ) -> Option<DangerousCommandMatch> {
     let mut command_index = 1;
     while let Some(argument) = command.get(command_index) {
-        if argument == "--" {
+        let arg = argument.as_str();
+        if arg == "--" {
             command_index += 1;
             break;
         }
-        if matches!(argument.as_str(), "-i" | "--ignore-environment")
-            || argument
-                .split_once('=')
-                .is_some_and(|(name, _)| !name.is_empty() && !name.starts_with('-'))
+        // NAME=VALUE environment assignment.
+        if arg
+            .split_once('=')
+            .is_some_and(|(name, _)| !name.is_empty() && !name.starts_with('-'))
+        {
+            command_index += 1;
+            continue;
+        }
+        // Flags that take no value.
+        if matches!(
+            arg,
+            "-i" | "--ignore-environment" | "-0" | "--null" | "-v" | "--debug"
+        ) {
+            command_index += 1;
+            continue;
+        }
+        // Long flag carrying an inline value, e.g. `--chdir=DIR`, `--unset=NAME`.
+        if let Some((name, _)) = arg.split_once('=')
+            && ENV_VALUE_TAKING_FLAGS.contains(&name)
+        {
+            command_index += 1;
+            continue;
+        }
+        // Flag whose value is the following argument, e.g. `-C /tmp`, `-u NAME`.
+        if ENV_VALUE_TAKING_FLAGS.contains(&arg) {
+            command_index += 2;
+            continue;
+        }
+        // Attached short value, e.g. `-C/tmp`, `-uPATH`.
+        if arg.len() > 2
+            && !arg.starts_with("--")
+            && (arg.starts_with("-C")
+                || arg.starts_with("-u")
+                || arg.starts_with("-S")
+                || arg.starts_with("-a"))
         {
             command_index += 1;
             continue;
         }
         break;
     }
+    // A value-taking flag as the final token can advance the index past the end.
+    let command_index = command_index.min(command.len());
     dangerous_command_match_with_depth(&command[command_index..], wrapper_depth + 1, platform)
 }
 
@@ -238,6 +287,24 @@ mod tests {
             vec_str(&["rm", "/tmp/example", "-f"]),
             vec_str(&["sudo", "rm", "-rf", "/tmp/example"]),
             vec_str(&["env", "TARGET=/tmp/example", "rm", "-rf", "/tmp/example"]),
+        ] {
+            assert_eq!(
+                dangerous_command_match(&command),
+                Some(DangerousCommandMatch::ForcedRm),
+                "{command:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn env_value_taking_flags_do_not_hide_wrapped_command() {
+        for command in [
+            vec_str(&["env", "-C", "/tmp", "rm", "-rf", "/tmp/example"]),
+            vec_str(&["env", "--chdir", "/tmp", "rm", "-rf", "/tmp/example"]),
+            vec_str(&["env", "--chdir=/tmp", "rm", "-rf", "/tmp/example"]),
+            vec_str(&["env", "-u", "FOO", "rm", "-rf", "/tmp/example"]),
+            vec_str(&["env", "-u", "FOO", "-C", "/tmp", "rm", "-rf", "/tmp/example"]),
+            vec_str(&["env", "-S", "rm -rf /tmp/example", "rm", "-rf", "/tmp/example"]),
         ] {
             assert_eq!(
                 dangerous_command_match(&command),
