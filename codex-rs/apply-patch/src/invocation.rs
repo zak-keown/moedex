@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use codex_exec_server::ExecutorFileSystem;
@@ -230,12 +231,28 @@ async fn try_verify_apply_patch_args(
         .transpose()?
         .unwrap_or_else(|| cwd.clone());
     let mut changes = HashMap::new();
+    let mut destinations: HashSet<PathUri> = HashSet::new();
     for hunk in hunks {
         let path = hunk.resolve_path(&effective_cwd)?;
         if changes.contains_key(&path) {
             return Err(ParseError::InvalidPatchError(format!(
                 "multiple operations target {}",
                 path.inferred_native_path_string()
+            ))
+            .into());
+        }
+        // Reject two hunks that would write to (or move onto) the same effective
+        // destination. `resolve_path` above keys on the *source* path, so two
+        // `Update`+`Move to` hunks with distinct sources but a shared destination
+        // slip past that check; applying them deletes both sources and leaves only
+        // the last hunk's content at the destination, silently dropping an edit.
+        // `Hunk::path()` returns the move destination for rename hunks and the
+        // plain target otherwise, i.e. the effective write location.
+        let destination = effective_cwd.join(&hunk.path().to_string_lossy())?;
+        if !destinations.insert(destination.clone()) {
+            return Err(ParseError::InvalidPatchError(format!(
+                "multiple operations target {}",
+                destination.inferred_native_path_string()
             ))
             .into());
         }
@@ -1003,6 +1020,53 @@ PATCH"#,
             .await;
 
             assert!(matches!(result, MaybeApplyPatchVerified::Body(_)));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_two_moves_to_same_destination_are_rejected() {
+        // Two Update hunks with distinct sources that both `*** Move to:` the
+        // same destination must be rejected. Otherwise both sources are deleted
+        // and only the last hunk's content survives at the shared destination,
+        // silently discarding the first edit (CR-001).
+        let session_dir = tempdir().unwrap();
+        fs::write(session_dir.path().join("a.txt"), "from a\n").unwrap();
+        fs::write(session_dir.path().join("b.txt"), "from b\n").unwrap();
+        let cwd = PathUri::from_host_native_path(session_dir.path()).expect("absolute test path");
+
+        let argv = vec![
+            "apply_patch".to_string(),
+            concat!(
+                "*** Begin Patch\n",
+                "*** Update File: a.txt\n",
+                "*** Move to: dest.txt\n",
+                "@@\n",
+                "-from a\n",
+                "+from a updated\n",
+                "*** Update File: b.txt\n",
+                "*** Move to: dest.txt\n",
+                "@@\n",
+                "-from b\n",
+                "+from b updated\n",
+                "*** End Patch",
+            )
+            .to_string(),
+        ];
+
+        let result =
+            maybe_parse_apply_patch_verified(&argv, &cwd, LOCAL_FS.as_ref(), /*sandbox*/ None).await;
+
+        match result {
+            MaybeApplyPatchVerified::CorrectnessError(err) => {
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("dest.txt"),
+                    "expected the rejection to name the shared destination, got: {msg}"
+                );
+            }
+            other => panic!(
+                "expected two hunks moving to the same destination to be rejected, got {other:?}"
+            ),
         }
     }
 
