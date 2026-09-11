@@ -17,6 +17,88 @@ MISMATCH_VERSION = "0.145.0"
 
 
 class InstallShTest(unittest.TestCase):
+    def test_uninstall_preserves_moedex_data_and_stock_codex(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            archive, checksum, metadata = create_package_release(root)
+            moedex_home = root / "moedex-home"
+            stock_home = root / "stock-codex-home"
+            stock_home.mkdir()
+            stock_data = stock_home / "auth.json"
+            stock_data.write_text("stock credentials\n", encoding="utf-8")
+            stock_binary = root / "bin" / "codex"
+            stock_binary.parent.mkdir(exist_ok=True)
+            write_executable(stock_binary, "#!/bin/sh\nprintf 'codex-cli 9.9.9\\n'\n")
+
+            installed, _ = run_installer_in(
+                root,
+                VERSION,
+                metadata_json=metadata,
+                archive_path=archive,
+                checksum_path=checksum,
+                force_macos=True,
+                moedex_home=moedex_home,
+                codex_home=stock_home,
+            )
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            moedex_data = moedex_home / "history.jsonl"
+            moedex_data.write_text("retained conversation\n", encoding="utf-8")
+            releases = moedex_home / "packages" / "standalone" / "releases"
+            self.assertTrue((root / "install-bin" / "moedex").is_symlink())
+            (root / "requests.log").unlink()
+
+            uninstalled, requests = run_installer_in(
+                root,
+                VERSION,
+                force_macos=True,
+                moedex_home=moedex_home,
+                codex_home=stock_home,
+                arguments=("--uninstall",),
+            )
+
+            self.assertEqual(uninstalled.returncode, 0, uninstalled.stderr)
+            self.assertEqual(requests, [])
+            self.assertFalse((root / "install-bin" / "moedex").exists())
+            self.assertFalse((root / "install-bin" / "moedex").is_symlink())
+            self.assertFalse((root / "install-bin" / "codex-code-mode-host").exists())
+            self.assertFalse(
+                (root / "install-bin" / "codex-code-mode-host").is_symlink()
+            )
+            self.assertFalse(
+                (moedex_home / "packages" / "standalone" / "current").exists()
+            )
+            self.assertTrue(any(releases.iterdir()))
+            self.assertEqual(moedex_data.read_text(), "retained conversation\n")
+            self.assertTrue(stock_binary.exists())
+            self.assertEqual(stock_data.read_text(), "stock credentials\n")
+
+    def test_uninstall_does_not_mutate_shared_codex_home_package_links(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            shared_home = root / "shared-home"
+            current = shared_home / "packages" / "standalone" / "current"
+            release = shared_home / "packages" / "standalone" / "releases" / "stock"
+            release.mkdir(parents=True)
+            current.symlink_to(release)
+            install_bin = root / "install-bin"
+            install_bin.mkdir()
+            (install_bin / "moedex").symlink_to(current / "bin" / "moedex")
+
+            result, requests = run_installer_in(
+                root,
+                VERSION,
+                force_macos=True,
+                codex_home=shared_home,
+                arguments=("--uninstall",),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(requests, [])
+            self.assertFalse((install_bin / "moedex").exists())
+            self.assertFalse((install_bin / "moedex").is_symlink())
+            self.assertTrue(current.is_symlink())
+            self.assertEqual(current.resolve(), release.resolve())
+
     def test_installer_uses_only_the_moedex_github_repository(self) -> None:
         script = INSTALL_SCRIPT.read_text()
         self.assertIn("github.com/zak-keown/moedex", script)
@@ -432,6 +514,9 @@ def run_installer_in(
     update_guard_from_release: str | None = None,
     old_updater_parent_pid: int | None = None,
     fail_ps: bool = False,
+    moedex_home: Path | None = None,
+    codex_home: Path | None = None,
+    arguments: tuple[str, ...] = (),
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     bin_dir = root / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -527,7 +612,7 @@ def run_installer_in(
     env = os.environ.copy()
     env.update(
         {
-            "CODEX_HOME": str(root / "codex-home"),
+            "CODEX_HOME": str(codex_home or root / "codex-home"),
             "CODEX_INSTALL_DIR": str(root / "install-bin"),
             "CODEX_NON_INTERACTIVE": "1",
             "CODEX_RELEASE": release,
@@ -545,6 +630,10 @@ def run_installer_in(
             "SHELL": "/bin/sh",
         }
     )
+    if moedex_home is not None:
+        env["MOEDEX_HOME"] = str(moedex_home)
+    else:
+        env.pop("MOEDEX_HOME", None)
     if update_guard_from_release is None:
         env.pop("CODEX_INSTALL_IF_LATEST", None)
         env.pop("CODEX_UPDATE_FROM_RELEASE", None)
@@ -555,7 +644,7 @@ def run_installer_in(
         env["CODEX_TEST_PARENT_PID"] = str(old_updater_parent_pid)
         env["CODEX_TEST_PARENT_START"] = process_start_time()
     result = subprocess.run(
-        ["/bin/sh", str(INSTALL_SCRIPT)],
+        ["/bin/sh", str(INSTALL_SCRIPT), *arguments],
         capture_output=True,
         check=False,
         env=env,

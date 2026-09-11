@@ -1,5 +1,14 @@
 use super::*;
+use clap::CommandFactory;
 use pretty_assertions::assert_eq;
+
+#[test]
+fn public_help_uses_moedex_exec() {
+    let help = Cli::command().render_long_help().to_string();
+
+    assert!(help.contains("Usage: moedex exec"), "{help}");
+    assert!(!help.contains("Usage: codex exec"), "{help}");
+}
 
 #[test]
 fn resume_parses_prompt_after_global_flags() {

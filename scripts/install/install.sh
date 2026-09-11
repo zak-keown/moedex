@@ -4,6 +4,7 @@ set -eu
 
 RELEASE="${MOEDEX_RELEASE:-${CODEX_RELEASE:-latest}}"
 NON_INTERACTIVE="${MOEDEX_NON_INTERACTIVE:-${CODEX_NON_INTERACTIVE:-false}}"
+ACTION="install"
 RELEASES_ASSET_TIMEOUT=300
 release_source="github"
 
@@ -11,6 +12,11 @@ BIN_DIR="${MOEDEX_INSTALL_DIR:-${CODEX_INSTALL_DIR:-$HOME/.local/bin}}"
 BIN_PATH="$BIN_DIR/moedex"
 CODE_MODE_HOST_BIN_PATH="$BIN_DIR/codex-code-mode-host"
 CODEX_HOME_DIR="${MOEDEX_HOME:-${CODEX_HOME:-$HOME/.moedex}}"
+if [ -n "${MOEDEX_HOME:-}" ] || [ -z "${CODEX_HOME:-}" ]; then
+  HOME_OWNERSHIP="moedex"
+else
+  HOME_OWNERSHIP="shared-codex"
+fi
 STANDALONE_ROOT="$CODEX_HOME_DIR/packages/standalone"
 RELEASES_DIR="$STANDALONE_ROOT/releases"
 CURRENT_LINK="$STANDALONE_ROOT/current"
@@ -75,9 +81,15 @@ parse_args() {
         RELEASE="$2"
         shift
         ;;
+      --uninstall)
+        ACTION="uninstall"
+        ;;
       --help | -h)
         cat <<EOF
-Usage: install.sh [--release VERSION]
+Usage: install.sh [--release VERSION] [--uninstall]
+
+  --uninstall removes installer-managed command links. It preserves Moedex
+  configuration, credentials, history, and downloaded release payloads.
 
 Environment:
   MOEDEX_RELEASE         Version to install; overridden by --release.
@@ -92,6 +104,43 @@ EOF
     esac
     shift
   done
+}
+
+remove_managed_link() {
+  link_path="$1"
+  shift
+  link_target="$(readlink "$link_path" 2>/dev/null || true)"
+
+  for managed_target in "$@"; do
+    if [ "$link_target" = "$managed_target" ]; then
+      rm -f "$link_path"
+      return
+    fi
+  done
+}
+
+uninstall_moedex() {
+  remove_managed_link \
+    "$BIN_PATH" \
+    "$CURRENT_LINK/bin/moedex" \
+    "$CURRENT_LINK/moedex"
+  remove_managed_link \
+    "$CODE_MODE_HOST_BIN_PATH" \
+    "$CURRENT_LINK/bin/codex-code-mode-host"
+
+  if [ "$HOME_OWNERSHIP" = "moedex" ]; then
+    current_target="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
+    case "$current_target" in
+      "$RELEASES_DIR"/*)
+        rm -f "$CURRENT_LINK"
+        ;;
+    esac
+  else
+    warn "Leaving package links in CODEX_HOME unchanged because that home may be shared with Codex."
+  fi
+
+  step "Removed installer-managed Moedex command links."
+  step "Moedex data and downloaded releases were preserved in $CODEX_HOME_DIR."
 }
 
 download_file() {
@@ -977,6 +1026,11 @@ verify_visible_command() {
 }
 
 parse_args "$@"
+
+if [ "$ACTION" = "uninstall" ]; then
+  uninstall_moedex
+  exit 0
+fi
 
 require_command mktemp
 require_command tar

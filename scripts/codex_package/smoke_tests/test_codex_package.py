@@ -55,7 +55,6 @@ def test_missing_required_helper_fails_qualification(
         pytest.param(("--help",), "Usage:", id="help"),
         pytest.param(("--version",), None, id="version"),
         pytest.param(("features", "list"), "code_mode", id="features"),
-        pytest.param(("completion", "bash"), "codex", id="completion"),
     ],
 )
 def test_cli_public_commands(
@@ -66,6 +65,80 @@ def test_cli_public_commands(
     """Packaged CLI remains usable for discovery, version, features, and completions."""
     output = package.run(*arguments).stdout
     assert expected in output if expected is not None else output.strip()
+
+
+def test_completion_invokes_public_moedex_command(package: SmokePackage) -> None:
+    output = package.run("completion", "bash").stdout
+    assert "_moedex()" in output
+    assert "complete -F _moedex -o bashdefault -o default moedex" in output
+    assert "complete -F _codex" not in output
+    assert "-o default codex" not in output
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        pytest.param(("--help",), "Usage: moedex", id="interactive-launch"),
+        pytest.param(("exec", "--help"), "Usage: moedex exec", id="exec"),
+        pytest.param(("resume", "--help"), "Usage: moedex resume", id="resume"),
+        pytest.param(("login", "--help"), "Usage: moedex login", id="login"),
+        pytest.param(
+            ("app-server", "--help"),
+            "Usage: moedex app-server",
+            id="app-server",
+        ),
+    ],
+)
+def test_packaged_headless_journey_entrypoints(
+    package: SmokePackage,
+    arguments: tuple[str, ...],
+    expected: str,
+) -> None:
+    """Every public journey starts headlessly without auth or a browser."""
+    output = package.run(*arguments).stdout
+    assert expected in output
+
+
+def test_packaged_exec_and_resume_complete_against_local_provider(
+    package: SmokePackage,
+    responses_server: MockResponsesServer,
+) -> None:
+    """Packaged exec creates a session that the packaged command can resume."""
+    responses_server.enqueue_assistant_message(
+        "first packaged turn", response_id="package-exec"
+    )
+    first = package.run(
+        "exec",
+        "--skip-git-repo-check",
+        "run the first packaged smoke turn",
+    )
+    assert "first packaged turn" in first.stdout
+
+    responses_server.enqueue_assistant_message(
+        "resumed packaged turn", response_id="package-resume"
+    )
+    resumed = package.run(
+        "exec",
+        "resume",
+        "--last",
+        "run the resumed packaged smoke turn",
+    )
+    assert "resumed packaged turn" in resumed.stdout
+
+
+def test_packaged_app_server_binary_has_headless_entrypoint(
+    package: SmokePackage,
+) -> None:
+    result = subprocess.run(
+        [str(package.app_server), "--help"],
+        cwd=package.directory,
+        env=package.environment,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=45,
+    )
+    assert "app-server" in result.stdout.lower()
 
 
 @pytest.mark.parametrize("entrypoint", ["codex", "codex-app-server"])
