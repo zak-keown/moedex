@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 9
+  fixed: 10
   stale: 0
   skipped: 1
   deferred: 0
-  open: 250
+  open: 249
 ---
 
 # Codebase Review — moedex
@@ -308,6 +308,10 @@ pub resets_at: i64,
 
 Fix: add `#[ts(type = "number | null")]` / `#[ts(type = "number")]` overrides to the five fields on `AccountTokenUsageSummary` and to `tokens` on `AccountTokenUsageDailyBucket` in `account.rs` (mirroring `granted_at`/`expires_at`/`resets_at` in the same file), then regenerate these two `.ts` files.
 
+**Disposition:** fixed
+**Commit:** `bbf1102153`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-008: `From<CoreSkillMetadata> for SkillMetadata` silently discards the source's `enabled` state
 
 **File:** `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`
