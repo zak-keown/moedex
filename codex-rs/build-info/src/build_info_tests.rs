@@ -6,9 +6,26 @@ use semver::Version;
 use tempfile::tempdir;
 
 use crate::BuildInfo;
+use crate::BuildProvenance;
 use crate::build_id;
 
 const BUILD_COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+
+#[test]
+fn version_leads_with_distribution_and_retains_upstream_provenance() {
+    let info = BuildInfo::for_test("0.1.0", "forksha", "upstreamsha", "github");
+
+    assert_eq!(info.display_version(), "Moedex 0.1.0");
+    assert_eq!(
+        info.provenance(),
+        BuildProvenance {
+            distribution_version: Version::new(0, 1, 0),
+            fork_commit: "forksha".to_string(),
+            upstream_commit: "upstreamsha".to_string(),
+            release_channel: "github".to_string(),
+        },
+    );
+}
 
 /// A packaged runtime takes its release identity from its package manifest.
 #[test]
@@ -31,10 +48,12 @@ fn packaged_runtime_uses_manifest_version() {
     );
 
     assert_eq!(
-        BuildInfo::resolve(&context, BUILD_COMMIT),
+        BuildInfo::resolve(&context, BUILD_COMMIT, "upstreamsha", "github"),
         BuildInfo {
             version: Version::parse("1.2.3-alpha.4").expect("valid release version"),
             build_commit: BUILD_COMMIT.to_string(),
+            upstream_commit: "upstreamsha".to_string(),
+            release_channel: "github".to_string(),
             target: Some(env!("CODEX_BUILD_TARGET").to_string()),
         },
     );
@@ -50,10 +69,12 @@ fn unpackaged_runtime_uses_build_commit() {
     );
 
     assert_eq!(
-        BuildInfo::resolve(&context, BUILD_COMMIT),
+        BuildInfo::resolve(&context, BUILD_COMMIT, "upstreamsha", "github"),
         BuildInfo {
             version: Version::new(0, 0, 0),
             build_commit: BUILD_COMMIT.to_string(),
+            upstream_commit: "upstreamsha".to_string(),
+            release_channel: "github".to_string(),
             target: Some(env!("CODEX_BUILD_TARGET").to_string()),
         },
     );
@@ -77,10 +98,12 @@ fn legacy_package_without_version_uses_build_commit() {
     );
 
     assert_eq!(
-        BuildInfo::resolve(&context, BUILD_COMMIT),
+        BuildInfo::resolve(&context, BUILD_COMMIT, "upstreamsha", "github"),
         BuildInfo {
             version: Version::new(0, 0, 0),
             build_commit: BUILD_COMMIT.to_string(),
+            upstream_commit: "upstreamsha".to_string(),
+            release_channel: "github".to_string(),
             target: Some(env!("CODEX_BUILD_TARGET").to_string()),
         },
     );
@@ -107,10 +130,12 @@ fn invalid_package_version_uses_build_commit() {
     );
 
     assert_eq!(
-        BuildInfo::resolve(&context, BUILD_COMMIT),
+        BuildInfo::resolve(&context, BUILD_COMMIT, "upstreamsha", "github"),
         BuildInfo {
             version: Version::new(0, 0, 0),
             build_commit: BUILD_COMMIT.to_string(),
+            upstream_commit: "upstreamsha".to_string(),
+            release_channel: "github".to_string(),
             target: Some(env!("CODEX_BUILD_TARGET").to_string()),
         },
     );
@@ -122,11 +147,15 @@ fn build_info_serialization_preserves_build_provenance() {
     let build_info = BuildInfo {
         version: Version::parse("1.2.3-alpha.4").expect("valid release version"),
         build_commit: BUILD_COMMIT.to_string(),
+        upstream_commit: "upstreamsha".to_string(),
+        release_channel: "github".to_string(),
         target: Some("x86_64-pc-windows-msvc".to_string()),
     };
     let serialized = serde_json::json!({
         "version": "1.2.3-alpha.4",
         "build_commit": BUILD_COMMIT,
+        "upstream_commit": "upstreamsha",
+        "release_channel": "github",
         "target": "x86_64-pc-windows-msvc",
     });
 

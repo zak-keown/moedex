@@ -280,7 +280,7 @@ async fn logout_account_removes_auth_and_notifies() -> Result<()> {
         AuthCredentialsStoreMode::File,
         AuthKeyringBackendKind::default(),
     )?;
-    assert!(codex_home.path().join("auth.json").exists());
+    assert!(codex_home.path().join("moedex-auth.json").exists());
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -308,8 +308,8 @@ async fn logout_account_removes_auth_and_notifies() -> Result<()> {
     assert_eq!(payload.plan_type, None);
 
     assert!(
-        !codex_home.path().join("auth.json").exists(),
-        "auth.json should be deleted"
+        !codex_home.path().join("moedex-auth.json").exists(),
+        "moedex-auth.json should be deleted"
     );
 
     let get_id = mcp
@@ -1092,7 +1092,7 @@ async fn login_account_api_key_succeeds_and_notifies() -> Result<()> {
     pretty_assertions::assert_eq!(payload.auth_mode, Some(AuthMode::ApiKey));
     pretty_assertions::assert_eq!(payload.plan_type, None);
 
-    assert!(codex_home.path().join("auth.json").exists());
+    assert!(codex_home.path().join("moedex-auth.json").exists());
     Ok(())
 }
 
@@ -1774,7 +1774,7 @@ async fn login_managed_bedrock_updates_active_bedrock_account() -> Result<()> {
         }
     );
 
-    assert!(codex_home.path().join("auth.json").exists());
+    assert!(codex_home.path().join("moedex-auth.json").exists());
     Ok(())
 }
 
@@ -2041,8 +2041,8 @@ async fn login_account_chatgpt_device_code_returns_error_when_disabled() -> Resu
         "account/login/completed should not be emitted when device code start fails"
     );
     assert!(
-        !codex_home.path().join("auth.json").exists(),
-        "auth.json should not be created when device code start fails"
+        !codex_home.path().join("moedex-auth.json").exists(),
+        "moedex-auth.json should not be created when device code start fails"
     );
     Ok(())
 }
@@ -2121,8 +2121,8 @@ async fn login_account_chatgpt_device_code_succeeds_and_notifies() -> Result<()>
     assert_eq!(payload.auth_mode, Some(AuthMode::Chatgpt));
     assert_eq!(payload.plan_type, Some(AccountPlanType::Pro));
     assert!(
-        codex_home.path().join("auth.json").exists(),
-        "auth.json should be created when device code login succeeds"
+        codex_home.path().join("moedex-auth.json").exists(),
+        "moedex-auth.json should be created when device code login succeeds"
     );
     Ok(())
 }
@@ -2192,8 +2192,8 @@ async fn login_account_chatgpt_device_code_failure_notifies_without_account_upda
         "account/updated should not be emitted when device code login fails"
     );
     assert!(
-        !codex_home.path().join("auth.json").exists(),
-        "auth.json should not be created when device code login fails"
+        !codex_home.path().join("moedex-auth.json").exists(),
+        "moedex-auth.json should not be created when device code login fails"
     );
     Ok(())
 }
@@ -2268,8 +2268,8 @@ async fn login_account_chatgpt_device_code_can_be_cancelled() -> Result<()> {
         "account/updated should not be emitted when device code login is cancelled"
     );
     assert!(
-        !codex_home.path().join("auth.json").exists(),
-        "auth.json should not be created when device code login is cancelled"
+        !codex_home.path().join("moedex-auth.json").exists(),
+        "moedex-auth.json should not be created when device code login is cancelled"
     );
     Ok(())
 }

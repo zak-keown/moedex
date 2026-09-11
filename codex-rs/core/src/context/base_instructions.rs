@@ -1,6 +1,9 @@
 use super::ContextualUserFragment;
 use codex_protocol::models::ContentItemKind;
 
+pub(crate) const MOEDEX_IDENTITY_INSTRUCTION: &str =
+    "You are operating in Moedex, an agentic coding interface based on the Codex CLI.";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BaseInstructionsFragment(pub(crate) String);
 

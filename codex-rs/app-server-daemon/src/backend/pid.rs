@@ -174,7 +174,7 @@ impl PidBackend {
                             .pid_file
                             .parent()
                             .and_then(Path::parent)
-                            .context("daemon pid path has no Codex home")?;
+                            .context("daemon pid path has no Moedex home")?;
                         let socket_path =
                             codex_app_server_transport::app_server_control_socket_path(codex_home)?;
                         if let Err(err) =
@@ -351,16 +351,31 @@ impl PidBackend {
     }
 
     #[cfg(any(unix, windows))]
-    fn command_args(&self) -> Vec<&'static str> {
+    fn command_args(&self) -> Result<Vec<std::ffi::OsString>> {
+        let mut args = vec![std::ffi::OsString::from("app-server")];
         match self.command_kind {
             PidCommandKind::AppServer {
-                remote_control_enabled: true,
-            } => vec!["app-server", "--remote-control", "--listen", "unix://"],
-            PidCommandKind::AppServer {
-                remote_control_enabled: false,
-            } => vec!["app-server", "--listen", "unix://"],
-            PidCommandKind::UpdateLoop => vec!["app-server", "daemon", "pid-update-loop"],
+                remote_control_enabled,
+            } => {
+                if remote_control_enabled {
+                    args.push("--remote-control".into());
+                }
+                args.push("--listen".into());
+                let home = self
+                    .pid_file
+                    .parent()
+                    .and_then(Path::parent)
+                    .context("daemon pid path has no product home")?;
+                let endpoint = codex_app_server_transport::app_server_control_socket_path(
+                    &std::path::absolute(home)?,
+                )?;
+                let mut listen = std::ffi::OsString::from("unix://");
+                listen.push(endpoint.as_os_str());
+                args.push(listen);
+            }
+            PidCommandKind::UpdateLoop => args.extend(["daemon".into(), "pid-update-loop".into()]),
         }
+        Ok(args)
     }
 
     #[cfg(any(unix, windows))]

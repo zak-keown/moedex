@@ -1,5 +1,6 @@
 pub(crate) mod debug_sandbox;
 mod exit_status;
+mod import_codex;
 pub(crate) mod login;
 
 use clap::Args;
@@ -12,6 +13,8 @@ use std::path::PathBuf;
 pub use debug_sandbox::run_command_under_landlock;
 pub use debug_sandbox::run_command_under_seatbelt;
 pub use debug_sandbox::run_command_under_windows_sandbox;
+pub use import_codex::ImportCommand;
+pub use import_codex::run_import_command;
 pub use login::read_access_token_from_stdin;
 pub use login::read_api_key_from_stdin;
 pub use login::run_login_status;
@@ -21,6 +24,10 @@ pub use login::run_login_with_chatgpt;
 pub use login::run_login_with_device_code;
 pub use login::run_login_with_device_code_fallback_to_browser;
 pub use login::run_logout;
+
+#[cfg(test)]
+#[path = "import_codex_tests.rs"]
+mod import_codex_tests;
 
 #[derive(Debug, Default, Args)]
 pub struct SandboxStateArgs {
@@ -61,7 +68,7 @@ pub struct SeatbeltCommand {
     )]
     pub permissions_profile: Option<String>,
 
-    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer <name>.config.toml from the effective Moedex home on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 
@@ -117,7 +124,7 @@ pub struct LandlockCommand {
     )]
     pub permissions_profile: Option<String>,
 
-    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer <name>.config.toml from the effective Moedex home on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 
@@ -160,7 +167,7 @@ pub struct WindowsCommand {
     )]
     pub permissions_profile: Option<String>,
 
-    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer <name>.config.toml from the effective Moedex home on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 

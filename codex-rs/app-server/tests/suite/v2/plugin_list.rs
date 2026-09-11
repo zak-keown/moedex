@@ -3318,7 +3318,7 @@ plugins = true
     let response: PluginListResponse =
         timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
 
-    assert!(!codex_home.path().join("auth.json").exists());
+    assert!(!codex_home.path().join("moedex-auth.json").exists());
     let api_curated_marketplace = response
         .marketplaces
         .iter()

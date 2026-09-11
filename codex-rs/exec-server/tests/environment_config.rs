@@ -135,3 +135,40 @@ async fn environment_config_read_rejects_empty_selectors() -> anyhow::Result<()>
     server.shutdown().await?;
     Ok(())
 }
+
+// Runs with native Windows paths on Windows and native Unix paths on Unix;
+// the client never supplies its own home in the config RPC.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_executor_resolves_its_own_moedex_home() -> anyhow::Result<()> {
+    let remote_home = tempfile::tempdir()?;
+    let remote_home = AbsolutePathBuf::from_absolute_path(remote_home.path().canonicalize()?)?;
+    tokio::fs::write(
+        remote_home.join(CONFIG_TOML_FILE).as_path(),
+        "[future_environment]\norigin = 'remote'\n",
+    )
+    .await?;
+    let mut server = common::exec_server::exec_server_with_env(
+        [("MOEDEX_HOME", remote_home.as_path().as_os_str())],
+        &[],
+    )
+    .await?;
+    let client_home = server.codex_home();
+    assert_ne!(remote_home.as_path(), client_home);
+    let environment = Environment::create_for_tests(Some(server.websocket_url().to_string()))?;
+    let response = environment
+        .read_environment_config(EnvironmentConfigReadParams {
+            cwd: PathUri::from_abs_path(&remote_home),
+            config_paths: vec![vec!["future_environment".to_string()]],
+            requirements_paths: Vec::new(),
+        })
+        .await?;
+    assert_eq!(
+        response.codex_home_dir,
+        PathUri::from_abs_path(&remote_home)
+    );
+    assert!(response.config.layers.iter().any(|layer| layer.base_dir
+        == PathUri::from_abs_path(&remote_home)
+        && layer.toml.contains("remote")));
+    server.shutdown().await?;
+    Ok(())
+}

@@ -1,81 +1,95 @@
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+# Moedex
 
----
+Moedex is an independent fork of [OpenAI Codex](https://github.com/openai/codex). It is a local coding harness for sustained engineering and research, distributed from [zak-keown/moedex](https://github.com/zak-keown/moedex).
 
-## Quickstart
+## Install
 
-### Installing and running Codex CLI
+Release packages cover these six targets:
 
-Run the following on Mac or Linux to install Codex CLI:
+| Operating system | Architectures                                                              |
+| ---------------- | -------------------------------------------------------------------------- |
+| macOS            | Apple silicon (`aarch64-apple-darwin`), Intel (`x86_64-apple-darwin`)      |
+| Linux            | ARM64 (`aarch64-unknown-linux-musl`), x86-64 (`x86_64-unknown-linux-musl`) |
+| Windows          | ARM64 (`aarch64-pc-windows-msvc`), x86-64 (`x86_64-pc-windows-msvc`)       |
+
+Install a pinned GitHub release on macOS or Linux, replacing `0.1.0` with the version you intend to run:
 
 ```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
+curl -fsSL https://github.com/zak-keown/moedex/releases/download/rust-v0.1.0/install.sh \
+  | MOEDEX_RELEASE=0.1.0 MOEDEX_NON_INTERACTIVE=1 sh
 ```
 
-Run the following on Windows to install Codex CLI:
+The equivalent PowerShell command is:
 
-```shell
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+```powershell
+$env:MOEDEX_RELEASE = "0.1.0"
+$env:MOEDEX_NON_INTERACTIVE = "1"
+irm https://github.com/zak-keown/moedex/releases/download/rust-v0.1.0/install.ps1 | iex
 ```
 
-The standalone installers download from `https://releases.openai.com/codex` by default and fall back to GitHub Releases if a metadata or asset download is unavailable. To force GitHub Releases, set `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM` to `false` (`0` and `no` are also accepted):
+Each installer selects the matching target archive, verifies its release and archive digests, and exposes the `moedex` command. Release CI validates the embedded per-payload checksums. Release assets retain per-target behavior evidence tying the package and symbol archive hashes to the fork commit, upstream base, and GitHub release channel.
+
+To build from source instead:
 
 ```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false sh
+git clone https://github.com/zak-keown/moedex.git
+cd moedex/codex-rs
+cargo build --release -p codex-cli --bin moedex
+./target/release/moedex --version
+```
+
+The proposed npm name is `@zak-keown/moedex`, but npm installation and automatic npm updates are disabled until ownership and publication are verified. Moedex does not fall back to `@openai/codex`, the stock Homebrew cask, WinGet, or OpenAI's release storage. Current updates come only from GitHub Releases in `zak-keown/moedex`.
+
+## Local state and Codex import
+
+Moedex resolves its effective home in this order:
+
+1. A nonempty `MOEDEX_HOME`.
+2. A nonempty `CODEX_HOME` compatibility override.
+3. `~/.moedex`.
+
+Blank variables are treated as unset. An invalid explicit path fails instead of silently falling back. Setting `CODEX_HOME` can deliberately share state with stock Codex; check the effective home shown by Moedex diagnostics before writing or deleting data. Repository-local `.codex` configuration and skills retain their compatibility names and precedence.
+
+Stock Codex data is never migrated automatically. Preview an explicit, copy-only import first:
+
+```shell
+moedex import codex --dry-run --settings --sessions
+```
+
+Then select only the categories you want:
+
+```shell
+moedex import codex --settings --sessions
+moedex import codex --credentials
+```
+
+Credential import is separately selected and defaults off. Conflicts default to skip. Choosing replacement creates a destination backup before replacement. Import leaves the source home unchanged, reports incompatible items individually, removes secrets and home-bound settings from copied configuration, and preserves rollout history needed to resume imported sessions.
+
+## Updates and uninstall
+
+The installer records whether the installed release follows `latest` or is pinned. Update checks and reinstall guidance use `zak-keown/moedex` GitHub Releases. An unavailable or unconfigured update channel leaves the current installation intact.
+
+To remove installer-owned commands and package links, use the installer uninstall entrypoint:
+
+```shell
+sh install.sh --uninstall
 ```
 
 ```powershell
-$env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM='false'; irm https://chatgpt.com/codex/install.ps1 | iex
+./install.ps1 -Uninstall
 ```
 
-Codex CLI can also be installed via the following package managers:
+Uninstall preserves Moedex settings, sessions, credentials, logs, and caches. It also preserves every stock Codex command and all stock Codex data. If you later decide to delete Moedex data, first inspect diagnostics and confirm the effective home is a Moedex-owned path. Delete that directory only as a separate, deliberate action; never use a shared `CODEX_HOME` path for cleanup.
 
-```shell
-# Install using npm
-npm install -g @openai/codex
-```
+## Provider and upstream attribution
 
-```shell
-# Install using Homebrew
-brew install --cask codex
-```
+Moedex preserves the Apache-2.0 license, notices, and upstream attribution. Authentication and hosted inference remain services of the provider you select, including OpenAI and ChatGPT where configured. Model names, provider environment variables, app-server protocol fields, rollout records, and internal `codex-*` crate and helper names remain where they describe a provider, historical data, or compatibility contract.
 
-Then simply run `codex` to get started.
+| Remaining term                                | Why it remains                                   |
+| --------------------------------------------- | ------------------------------------------------ |
+| `codex-*`, `CODEX_*`, and internal paths      | Compatibility-facing implementation identifiers. |
+| OpenAI, ChatGPT, model names, and Codex Cloud | Provider, model, or upstream service labels.     |
+| App-server protocol names and rollout history | Stable protocol and historical data.             |
+| OpenAI Codex                                  | Upstream attribution.                            |
 
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
-
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
-
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
-
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
-
-</details>
-
-### Using Codex with your ChatGPT plan
-
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Business, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
-
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
-
-## Docs
-
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
-
-This repository is licensed under the [Apache-2.0 License](LICENSE).
+See the [Apache-2.0 License](LICENSE) and the versioned [`moedex-behavior-manifest.json`](moedex-behavior-manifest.json) qualification contract.

@@ -160,7 +160,7 @@ async fn start_retries_stale_empty_pid_file_under_its_own_lock() {
 async fn legacy_launch_clears_recovery_best_effort() {
     for snapshot_is_directory in [false, true] {
         let home = TempDir::new().expect("temp dir");
-        let state_dir = home.path().join("app-server-daemon");
+        let state_dir = home.path().join("moedex-daemon");
         std::fs::create_dir_all(&state_dir).expect("state dir");
         let recovery_file = codex_app_server_transport::daemon_recovery_file_path(home.path());
         if snapshot_is_directory {
@@ -526,36 +526,57 @@ fn update_loop_uses_hidden_app_server_subcommand() {
     };
 
     assert_eq!(
-        backend.command_args(),
+        backend.command_args().expect("command arguments"),
         vec!["app-server", "daemon", "pid-update-loop"]
     );
 }
 
 #[test]
 fn app_server_remote_control_uses_runtime_flag() {
+    let home = TempDir::new().expect("home");
+    let endpoint =
+        codex_app_server_transport::app_server_control_socket_path(home.path()).expect("endpoint");
     let backend = PidBackend::new(
         "codex".into(),
-        "app-server.pid".into(),
+        crate::daemon_state_dir(home.path()).join("app-server.pid"),
         /*remote_control_enabled*/ true,
     );
 
     assert_eq!(
-        backend.command_args(),
-        vec!["app-server", "--remote-control", "--listen", "unix://"]
+        backend.command_args().expect("command arguments"),
+        vec![
+            "app-server".to_owned(),
+            "--remote-control".to_owned(),
+            "--listen".to_owned(),
+            format!("unix://{}", endpoint.display())
+        ]
+        .into_iter()
+        .map(std::ffi::OsString::from)
+        .collect::<Vec<_>>()
     );
 }
 
 #[test]
 fn app_server_disabled_remote_control_uses_compatible_args_and_runtime_env() {
+    let home = TempDir::new().expect("home");
+    let endpoint =
+        codex_app_server_transport::app_server_control_socket_path(home.path()).expect("endpoint");
     let backend = PidBackend::new(
         "codex".into(),
-        "app-server.pid".into(),
+        crate::daemon_state_dir(home.path()).join("app-server.pid"),
         /*remote_control_enabled*/ false,
     );
 
     assert_eq!(
-        backend.command_args(),
-        vec!["app-server", "--listen", "unix://"]
+        backend.command_args().expect("command arguments"),
+        vec![
+            "app-server".to_owned(),
+            "--listen".to_owned(),
+            format!("unix://{}", endpoint.display())
+        ]
+        .into_iter()
+        .map(std::ffi::OsString::from)
+        .collect::<Vec<_>>()
     );
     assert_eq!(
         backend.command_env(),
@@ -820,4 +841,124 @@ fn inaccessible_reused_pid_is_stale_without_hiding_process_open_errors() {
     })
     .join()
     .expect("anonymous identity check");
+}
+
+#[test]
+fn managed_child_uses_resolved_listener_instead_of_legacy_default() {
+    let home = TempDir::new().expect("home");
+    let backend = PidBackend::new(
+        home.path().join("codex"),
+        crate::daemon_state_dir(home.path()).join("app-server.pid"),
+        /*remote_control_enabled*/ false,
+    );
+    let endpoint =
+        codex_app_server_transport::app_server_control_socket_path(home.path()).expect("endpoint");
+    assert_eq!(
+        backend
+            .command_args()
+            .expect("arguments")
+            .last()
+            .map(|arg| arg.to_string_lossy().into_owned()),
+        Some(format!("unix://{}", endpoint.display()))
+    );
+}
+
+#[tokio::test]
+async fn legacy_listener_child() -> anyhow::Result<()> {
+    let Some(home) = std::env::var_os("MOEDEX_TEST_LEGACY_CHILD_HOME") else {
+        return Ok(());
+    };
+    let home = std::path::PathBuf::from(home);
+    let listener = std::env::var("MOEDEX_TEST_LEGACY_LISTEN")?;
+    let path = listener.strip_prefix("unix://").expect("unix listener");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(home.join("app-server-control/app-server-startup.lock"))?;
+    lock.lock()?;
+    let _listener = codex_uds::UnixListener::bind(std::path::Path::new(path)).await?;
+    drop(lock);
+    let observed = [
+        std::env::var("MOEDEX_HOME")?,
+        std::env::var("CODEX_HOME")?,
+        std::env::current_dir()?
+            .canonicalize()?
+            .display()
+            .to_string(),
+        listener,
+    ];
+    std::fs::write(
+        home.join("child-observed.json"),
+        serde_json::to_vec(&observed)?,
+    )?;
+    std::future::pending::<()>().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn legacy_child_binds_explicit_endpoint_with_stale_lock_and_resolved_environment()
+-> anyhow::Result<()> {
+    // macOS's canonical per-user temp path can exceed the Unix socket limit.
+    #[cfg(unix)]
+    let home = TempDir::new_in("/tmp")?;
+    #[cfg(windows)]
+    let home = TempDir::new()?;
+    let home_path = home.path().canonicalize()?;
+    let state = crate::daemon_state_dir(&home_path);
+    std::fs::create_dir(&state)?;
+    let endpoint = codex_app_server_transport::app_server_control_socket_path(&home_path)?;
+    codex_uds::prepare_private_socket_directory(endpoint.parent().expect("socket parent")).await?;
+    let legacy_lock = home_path.join("app-server-control/app-server-startup.lock");
+    std::fs::create_dir_all(legacy_lock.parent().expect("parent"))?;
+    drop(
+        std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&legacy_lock)?,
+    );
+    let _guard = codex_diagnostics::acquire_selected_daemon_home_guard(&home_path)?;
+    let exe = std::env::current_exe()?;
+    let backend = PidBackend::new(
+        exe.clone(),
+        state.join("server.pid"),
+        /*remote_control_enabled*/ false,
+    );
+    let args = backend.command_args()?;
+    let listener = args.last().expect("listener argument");
+    let mut command = tokio::process::Command::new(exe);
+    command
+        .args(["--exact", "backend::pid::tests::legacy_listener_child"])
+        .env("MOEDEX_TEST_LEGACY_CHILD_HOME", &home_path)
+        .env("MOEDEX_TEST_LEGACY_LISTEN", listener)
+        .env("MOEDEX_HOME", "conflicting-relative-moe")
+        .env("CODEX_HOME", "conflicting-relative-codex")
+        .current_dir(&home_path)
+        .kill_on_drop(true);
+    backend.configure_local_home(&mut command)?;
+    let mut child = command.spawn()?;
+    let observed = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(value) = tokio::fs::read(home_path.join("child-observed.json")).await {
+                break value;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    child.kill().await?;
+    child.wait().await?;
+    let observed: [String; 4] = serde_json::from_slice(&observed?)?;
+    let expected_cwd = if cfg!(windows) { &state } else { &home_path };
+    assert_eq!(
+        observed,
+        [
+            home_path.display().to_string(),
+            home_path.display().to_string(),
+            expected_cwd.display().to_string(),
+            format!("unix://{}", endpoint.display())
+        ]
+    );
+    Ok(())
 }

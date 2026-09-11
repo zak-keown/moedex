@@ -207,7 +207,7 @@ async fn setup_bedrock_profile_and_environment() -> Result<()> {
         AuthCredentialsStoreMode::File,
         AuthKeyringBackendKind::default(),
     )?;
-    let auth_path = managed_home.path().join("auth.json");
+    let auth_path = managed_home.path().join("moedex-auth.json");
     let expected_auth = std::fs::read_to_string(&auth_path)?;
     let mut app_server = bedrock_app_server(
         managed_home.path(),
@@ -383,7 +383,7 @@ async fn setup_bedrock_rejects_invalid_or_conflicting_credentials() -> Result<()
         assert_eq!(std::fs::read_to_string(&config_path)?, expected_config);
         assert_eq!(std::fs::read_to_string(&source_path)?, exporter_config);
         assert_eq!(std::fs::read_to_string(&active_path)?, expected_active);
-        assert!(!layered_home.path().join("auth.json").exists());
+        assert!(!layered_home.path().join("moedex-auth.json").exists());
         assert!(!layered_home.path().join(".env").exists());
     }
 

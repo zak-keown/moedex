@@ -13,7 +13,11 @@ doctest = false
 workspace = true
 
 [dependencies]
+codex-utils-home-dir = { workspace = true }
+codex-utils-absolute-path = { workspace = true }
+tracing = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 pretty_assertions = { workspace = true }

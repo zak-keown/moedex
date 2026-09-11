@@ -4,10 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 build = "build.rs"
-default-run = "codex"
+default-run = "moedex"
 
 [[bin]]
-name = "codex"
+name = "moedex"
 path = "src/main.rs"
 
 [[bin]]
@@ -41,6 +41,7 @@ codex-cloud-tasks = { path = "../cloud-tasks" }
 codex-utils-cli = { workspace = true }
 codex-config = { workspace = true }
 codex-core = { workspace = true }
+codex-diagnostics = { workspace = true }
 codex-core-plugins = { workspace = true }
 codex-history = { workspace = true }
 codex-home = { workspace = true }
@@ -48,6 +49,7 @@ codex-http-client = { workspace = true }
 codex-exec = { workspace = true }
 codex-exec-server = { workspace = true }
 codex-execpolicy = { workspace = true }
+codex-external-agent-migration = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-features = { workspace = true }
 codex-git-attribution = { workspace = true }
@@ -59,6 +61,7 @@ codex-mcp = { workspace = true }
 codex-model-provider = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-plugin = { workspace = true }
+codex-product-identity = { workspace = true }
 codex-protocol = { workspace = true }
 codex-responses-api-proxy = { workspace = true }
 codex-rmcp-client = { workspace = true }
@@ -72,9 +75,11 @@ codex-terminal-detection = { workspace = true }
 codex-thread-store = { workspace = true }
 codex-tui = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
+codex-utils-home-dir = { workspace = true }
 codex-utils-path = { workspace = true }
 crossterm = { workspace = true, features = ["event-stream"] }
 futures = { workspace = true }
+dirs = { workspace = true }
 http = { workspace = true }
 libc = { workspace = true }
 os_info = { workspace = true }

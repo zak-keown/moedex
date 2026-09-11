@@ -17,6 +17,7 @@ use codex_app_server_protocol::LoginAccountParams;
 use codex_app_server_protocol::LoginAccountResponse;
 use codex_login::AuthConfig;
 use codex_login::read_openai_api_key_from_env;
+use codex_product_identity::PRODUCT_IDENTITY;
 use codex_protocol::auth::AuthMode;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -437,12 +438,23 @@ impl AuthModeWidget {
 
     fn render_pick_mode(&self, area: Rect, buf: &mut Buffer) {
         let mut lines: Vec<Line> = if self.bedrock_setup_enabled {
-            vec!["  Choose how you want to use Codex.".into(), "".into()]
+            vec![
+                format!(
+                    "  Choose how you want to use {}.",
+                    PRODUCT_IDENTITY.display_name
+                )
+                .into(),
+                "".into(),
+            ]
         } else {
             vec![
                 Line::from(vec![
                     "  ".into(),
-                    "Sign in with ChatGPT to use Codex as part of your paid plan".into(),
+                    format!(
+                        "Sign in with ChatGPT to use {} as part of your paid plan",
+                        PRODUCT_IDENTITY.display_name
+                    )
+                    .into(),
                 ]),
                 Line::from(vec![
                     "  ".into(),
@@ -630,10 +642,10 @@ impl AuthModeWidget {
             "".into(),
             "  Before you start:".into(),
             "".into(),
-            "  Decide how much autonomy you want to grant Codex".into(),
+            "  Decide how much autonomy you want to grant Moedex".into(),
             docs_line,
             "".into(),
-            "  Codex can make mistakes".into(),
+            "  Moedex can make mistakes".into(),
             HyperlinkLine::new(
                 "  Review the code it writes and commands it runs"
                     .dim()
@@ -672,7 +684,7 @@ impl AuthModeWidget {
         let lines = vec![
             "✓ API key configured".fg(Color::Green).into(),
             "".into(),
-            "  Codex will use usage-based billing with your API key.".into(),
+            "  Moedex will use usage-based billing with your API key.".into(),
         ];
 
         Paragraph::new(lines)
@@ -1233,8 +1245,8 @@ mod tests {
         while rows.last().is_some_and(String::is_empty) {
             rows.pop();
         }
-        insta::assert_snapshot!(rows.join("\n"), @r###"
-          Choose how you want to use Codex.
+        insta::assert_snapshot!(rows.join("\n"), @"
+          Choose how you want to use Moedex.
 
         > 1. Sign in with ChatGPT
              Usage included with Plus, Pro, Business, and Enterprise plans
@@ -1249,7 +1261,7 @@ mod tests {
              Connect using your AWS credentials
 
           Press enter to continue
-        "###);
+        ");
 
         widget.auth_config.forced_login_method = Some(ForcedLoginMethod::Chatgpt);
         assert_eq!(

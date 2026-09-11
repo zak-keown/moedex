@@ -212,7 +212,8 @@ impl App {
             },
         };
         if config.active_project.trust_level.is_none() {
-            return self.working_directory_error("This directory is not trusted; run Codex there.");
+            return self
+                .working_directory_error("This directory is not trusted; run Moedex there.");
         }
         if let Some((_, checkout, crate::app_event::ManagedWorktreeMode::Fork, _)) =
             managed_worktree.as_ref()

@@ -2,7 +2,7 @@
 
 ROOT_OF_EXTRACTED_PACKAGE
 ├── bin
-│   ├── codex[.exe]                       # CLI package only
+│   ├── moedex[.exe]                      # CLI package only
 │   ├── codex-app-server[.exe]            # app-server package only
 │   └── codex-code-mode-host[.exe]
 ├── codex-package.json
@@ -19,6 +19,7 @@ Each package contains one entrypoint, not both codex and codex-app-server.
 """
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,56 @@ from app_server_harness import (
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 from fixtures import SmokePackage
+from fixtures import validate_extracted_package
+
+PATH_ALIAS_WARNING = re.compile(
+    r"WARNING: proceeding, even though we could not create PATH aliases: .+"
+)
+
+
+def assert_tui_terminal_admission(result: subprocess.CompletedProcess[str]) -> None:
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+    lines = output.splitlines()
+    assert lines[-1:] == ["Error: stdin is not a terminal"], output
+    assert len(lines) <= 2, output
+    if len(lines) == 2:
+        assert PATH_ALIAS_WARNING.fullmatch(lines[0]), output
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    (
+        "Error: stdin is not a terminal\n",
+        "WARNING: proceeding, even though we could not create PATH aliases: permission denied\n"
+        "Error: stdin is not a terminal\n",
+    ),
+)
+def test_tui_terminal_admission_output_contract(stderr: str) -> None:
+    result = subprocess.CompletedProcess(["moedex"], 1, stdout="", stderr=stderr)
+    assert_tui_terminal_admission(result)
+
+
+def test_tui_terminal_admission_rejects_unrelated_output() -> None:
+    result = subprocess.CompletedProcess(
+        ["moedex"],
+        1,
+        stdout="",
+        stderr="unexpected warning\nError: stdin is not a terminal\n",
+    )
+    with pytest.raises(AssertionError):
+        assert_tui_terminal_admission(result)
+
+
+def test_missing_required_helper_fails_qualification(
+    package: SmokePackage, tmp_path: Path
+) -> None:
+    copied_package = tmp_path / "package"
+    shutil.copytree(package.cli_root, copied_package)
+    suffix = ".exe" if "windows" in package.target else ""
+    (copied_package / "bin" / f"codex-code-mode-host{suffix}").unlink()
+
+    with pytest.raises(AssertionError, match="missing required package helpers"):
+        validate_extracted_package(copied_package, package.target)
 
 
 @pytest.mark.parametrize(
@@ -42,7 +93,6 @@ from fixtures import SmokePackage
         pytest.param(("--help",), "Usage:", id="help"),
         pytest.param(("--version",), None, id="version"),
         pytest.param(("features", "list"), "code_mode", id="features"),
-        pytest.param(("completion", "bash"), "codex", id="completion"),
     ],
 )
 def test_cli_public_commands(
@@ -53,6 +103,128 @@ def test_cli_public_commands(
     """Packaged CLI remains usable for discovery, version, features, and completions."""
     output = package.run(*arguments).stdout
     assert expected in output if expected is not None else output.strip()
+
+
+def test_completion_invokes_public_moedex_command(package: SmokePackage) -> None:
+    output = package.run("completion", "bash").stdout
+    assert "_moedex()" in output
+    assert "complete -F _moedex -o bashdefault -o default moedex" in output
+    forbidden_public_patterns = (
+        r"(?m)^\s*codex(?:__[^)]*)?\)",
+        r"\b_codex\b",
+        r"(?m)^complete\b.*\bcodex$",
+        r"\bcodex (?:app-server|completion|exec|features|login|mcp|plugin|resume)\b",
+    )
+    for pattern in forbidden_public_patterns:
+        assert re.search(pattern, output, flags=re.IGNORECASE) is None, pattern
+
+    # `import codex` names the explicit stock-product import source. It is the
+    # only public completion state in which a lowercase `codex` token is valid.
+    public_codex_lines = [
+        line
+        for line in output.splitlines()
+        if re.search(r"\bcodex\b", line, flags=re.IGNORECASE)
+    ]
+    assert all("moedex__import__codex" in line for line in public_codex_lines)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        pytest.param(("--help",), "Usage: moedex", id="root-help"),
+        pytest.param(("exec", "--help"), "Usage: moedex exec", id="exec"),
+        pytest.param(("resume", "--help"), "Usage: moedex resume", id="resume"),
+        pytest.param(("login", "--help"), "Usage: moedex login", id="login"),
+        pytest.param(
+            ("app-server", "--help"),
+            "Usage: moedex app-server",
+            id="app-server",
+        ),
+    ],
+)
+def test_packaged_headless_journey_entrypoints(
+    package: SmokePackage,
+    arguments: tuple[str, ...],
+    expected: str,
+) -> None:
+    """Every public journey starts headlessly without auth or a browser."""
+    output = package.run(*arguments).stdout
+    assert expected in output
+
+
+def test_packaged_interactive_launch_dispatches_tui_headlessly(
+    package: SmokePackage,
+) -> None:
+    """The package reaches TUI terminal admission without opening a browser."""
+    environment = dict(package.environment)
+    environment["TERM"] = "xterm-256color"
+    for variable in (
+        "TERM_PROGRAM",
+        "TERM_SESSION_ID",
+        "LC_TERMINAL",
+        "WT_SESSION",
+        "TMUX",
+        "TMUX_PANE",
+        "ZELLIJ",
+        "ZELLIJ_SESSION_NAME",
+    ):
+        environment.pop(variable, None)
+
+    result = subprocess.run(
+        [str(package.cli)],
+        cwd=package.directory,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode != 0
+    assert_tui_terminal_admission(result)
+
+
+def test_packaged_exec_and_resume_complete_against_local_provider(
+    package: SmokePackage,
+    responses_server: MockResponsesServer,
+) -> None:
+    """Packaged exec creates a session that the packaged command can resume."""
+    responses_server.enqueue_assistant_message(
+        "first packaged turn", response_id="package-exec"
+    )
+    first = package.run(
+        "exec",
+        "--skip-git-repo-check",
+        "run the first packaged smoke turn",
+    )
+    assert "first packaged turn" in first.stdout
+
+    responses_server.enqueue_assistant_message(
+        "resumed packaged turn", response_id="package-resume"
+    )
+    resumed = package.run(
+        "exec",
+        "resume",
+        "--last",
+        "run the resumed packaged smoke turn",
+    )
+    assert "resumed packaged turn" in resumed.stdout
+
+
+def test_packaged_app_server_binary_has_headless_entrypoint(
+    package: SmokePackage,
+) -> None:
+    result = subprocess.run(
+        [str(package.app_server), "--help"],
+        cwd=package.directory,
+        env=package.environment,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=45,
+    )
+    assert "app-server" in result.stdout.lower()
 
 
 @pytest.mark.parametrize("entrypoint", ["codex", "codex-app-server"])

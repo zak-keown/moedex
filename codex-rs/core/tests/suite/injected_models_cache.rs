@@ -374,7 +374,7 @@ async fn account_switch_during_cache_store_preserves_new_catalog_for_next_turn()
     tokens.account_id = Some("second-account".into());
     tokens.access_token = "second-account-token".into();
     std::fs::write(
-        home.path().join("auth.json"),
+        home.path().join("moedex-auth.json"),
         serde_json::to_vec(&serde_json::json!({
             "auth_mode": "chatgpt", "tokens": tokens, "last_refresh": Utc::now(),
         }))?,

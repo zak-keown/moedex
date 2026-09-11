@@ -46,7 +46,7 @@ pub(crate) fn server_version_notice(client: &str, server: Option<&str>) -> Optio
     let server = server?;
     crate::update_versions::is_official_server_older(client, server).then(|| {
         format!(
-            "A background Codex service is running v{server}, older than your Codex CLI v{client}."
+            "A background Moedex service is running v{server}, older than your Moedex CLI v{client}."
         )
     })
 }
@@ -207,7 +207,7 @@ mod tests {
     fn server_version_notice_only_for_older_official_server() {
         assert_eq!(
             server_version_notice("0.153.0", Some("0.152.1")),
-            Some("A background Codex service is running v0.152.1, older than your Codex CLI v0.153.0.".to_string())
+            Some("A background Moedex service is running v0.152.1, older than your Moedex CLI v0.153.0.".to_string())
         );
         assert_eq!(server_version_notice("0.153.0", Some("0.153.0")), None);
         assert_eq!(server_version_notice("0.0.0", Some("0.152.1")), None);

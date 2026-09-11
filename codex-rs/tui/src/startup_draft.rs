@@ -8,6 +8,7 @@ use std::task::Poll;
 use std::time::Duration;
 use std::time::Instant;
 
+use codex_product_identity::PRODUCT_IDENTITY;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -512,7 +513,7 @@ fn startup_draft_bottom_pane(
             frame_requester,
             has_input_focus: true,
             enhanced_keys_supported,
-            placeholder_text: "Ask Codex to do anything".to_string(),
+            placeholder_text: format!("Ask {} to do anything", PRODUCT_IDENTITY.display_name),
             disable_paste_burst: false,
             animations_enabled: true,
             skills: None,

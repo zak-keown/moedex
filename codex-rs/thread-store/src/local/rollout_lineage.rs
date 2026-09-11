@@ -97,13 +97,13 @@ impl LocalThreadStore {
                 LineageRepresentation::PlainForReference => {
                     let outside_codex_home = || ThreadStoreError::InvalidRequest {
                         message: format!(
-                            "rollout path `{}` must be in Codex home directory",
+                            "rollout path `{}` must be in Moedex home directory",
                             rollout_path.display()
                         ),
                     };
                     let canonical_rollout_path = std::fs::canonicalize(rollout_path.as_path())
                         .map_err(|_| outside_codex_home())?;
-                    // Resume can retain either the logical Codex home path or its canonical
+                    // Resume can retain either the logical Moedex home path or its canonical
                     // target. Keep references inside canonical managed roots so nested symlinks
                     // cannot escape them.
                     let is_managed_rollout = [

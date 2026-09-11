@@ -43,7 +43,7 @@ async fn rejects_reference_lineage_escaping_symlinked_sessions_root() {
         .await
         .expect_err("escaping reference lineage should be rejected");
 
-    assert!(error.to_string().contains("must be in Codex home"));
+    assert!(error.to_string().contains("must be in Moedex home"));
 }
 
 #[tokio::test]

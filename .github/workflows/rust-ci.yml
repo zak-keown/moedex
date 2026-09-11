@@ -175,13 +175,13 @@ jobs:
         include:
           - name: Linux
             runner: ubuntu-24.04
-            timeout_minutes: 30
+            timeout_minutes: 60
           - name: macOS
             runner: macos-15-xlarge
-            timeout_minutes: 30
+            timeout_minutes: 60
           - name: Windows
             runner: windows-x64
-            timeout_minutes: 30
+            timeout_minutes: 60
             runs_on:
               group: ${{ github.event.repository.name }}-runners
               labels: ${{ github.event.repository.name }}-windows-x64

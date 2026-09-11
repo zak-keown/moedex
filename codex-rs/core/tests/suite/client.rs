@@ -667,7 +667,7 @@ async fn response_item_ids_are_sent_for_all_remote_v2_compaction_requests() -> a
     Ok(())
 }
 
-/// Writes an `auth.json` into the provided `codex_home` with the specified parameters.
+/// Writes a `moedex-auth.json` into the provided `codex_home` with the specified parameters.
 /// Returns the fake JWT string written to `tokens.id_token`.
 #[expect(clippy::unwrap_used)]
 fn write_auth_json(
@@ -711,7 +711,7 @@ fn write_auth_json(
     });
 
     std::fs::write(
-        codex_home.path().join("auth.json"),
+        codex_home.path().join("moedex-auth.json"),
         serde_json::to_string_pretty(&auth_json).unwrap(),
     )
     .unwrap();
@@ -1765,7 +1765,7 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
 
     // Init session
     let codex_home = TempDir::new().unwrap();
-    // Write auth.json that contains both API key and ChatGPT tokens for a plan that should prefer ChatGPT,
+    // Write moedex-auth.json that contains both API key and ChatGPT tokens for a plan that should prefer ChatGPT,
     // but config will force API key preference.
     let _jwt = write_auth_json(
         &codex_home,

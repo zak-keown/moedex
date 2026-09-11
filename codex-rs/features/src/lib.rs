@@ -177,7 +177,7 @@ pub enum Feature {
     /// Enable importing project-scoped memory from external agents.
     ExternalAgentMemoryImport,
     /// Compress cold local thread-store rollout files, including shared histories.
-    /// Requires every reader of the Codex home to support compressed shared histories.
+    /// Requires every reader of the Moedex home to support compressed shared histories.
     LocalThreadStoreCompression,
     /// Removed compatibility flag; local_thread_store_compression controls all rollout files.
     LocalThreadStoreSharedCompression,
@@ -1245,7 +1245,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         stage: Stage::Experimental {
             name: "Network proxy",
             menu_description: "Apply network proxy restrictions to sandboxed sessions that already have network access.",
-            announcement: "NEW: Network proxy can now be enabled from /experimental. Restart Codex after enabling it.",
+            announcement: "NEW: Network proxy can now be enabled from /experimental. Restart Moedex after enabling it.",
         },
         default_enabled: false,
     },
@@ -1255,7 +1255,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         stage: Stage::Experimental {
             name: "Worktrees",
             menu_description: "Create isolated Git worktrees and group sessions by repository.",
-            announcement: "NEW: Worktrees can now be enabled from /experimental. Restart Codex after enabling it.",
+            announcement: "NEW: Worktrees can now be enabled from /experimental. Restart Moedex after enabling it.",
         },
         default_enabled: false,
     },
@@ -1691,7 +1691,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         stage: Stage::Experimental {
             name: "Voice conversations",
             menu_description: "Talk with Codex using /voice.",
-            announcement: "NEW: Voice conversations can now be enabled from /experimental. Restart Codex after enabling, then use /voice.",
+            announcement: "NEW: Voice conversations can now be enabled from /experimental. Restart Moedex after enabling, then use /voice.",
         },
         default_enabled: false,
     },

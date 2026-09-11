@@ -33,7 +33,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
     group.addoption(
         "--symbols-archive",
+        "--cli-symbols-archive",
+        dest="cli_symbols_archive",
         type=Path,
         required=True,
-        help="Gzip archive containing symbols for all packaged binaries.",
+        help="Gzip archive containing symbols for the CLI package.",
+    )
+    group.addoption(
+        "--app-server-symbols-archive",
+        type=Path,
+        help="Gzip archive containing app-server package symbols.",
     )

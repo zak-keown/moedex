@@ -2,6 +2,21 @@ use crate::sessions::ExternalAgentSessionMigration;
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictPolicy {
+    Skip,
+    ReplaceWithBackup,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct CodexImportSelection {
+    pub settings: bool,
+    pub sessions: bool,
+    pub credentials: bool,
+    pub conflict_policy: ConflictPolicy,
+}
+
 const DEFAULT_SESSION_IMPORT_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const DEFAULT_SESSION_IMPORT_MAX_COUNT: usize = 50;
 

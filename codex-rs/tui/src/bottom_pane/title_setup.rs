@@ -7,6 +7,7 @@
 //! - Reorder items
 //! - Preview the rendered title
 
+use codex_product_identity::PRODUCT_IDENTITY;
 use itertools::Itertools;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -37,7 +38,7 @@ use crate::render::renderable::Renderable;
 #[derive(EnumIter, EnumString, Display, Debug, Clone, Copy, Eq, PartialEq, Hash)]
 #[strum(serialize_all = "kebab-case")]
 pub(crate) enum TerminalTitleItem {
-    /// Codex app name.
+    /// Moedex app name.
     AppName,
     /// Project root name, or a compact cwd fallback.
     #[strum(to_string = "project-name", serialize = "project")]
@@ -66,7 +67,7 @@ pub(crate) enum TerminalTitleItem {
     FiveHourLimit,
     /// Remaining usage on the secondary rate limit.
     WeeklyLimit,
-    /// Codex application version.
+    /// Moedex application version.
     CodexVersion,
     /// Total tokens used in the current session.
     UsedTokens,
@@ -97,7 +98,7 @@ pub(crate) enum TerminalTitleItem {
 impl TerminalTitleItem {
     pub(crate) fn description(self) -> &'static str {
         match self {
-            TerminalTitleItem::AppName => "Codex app name",
+            TerminalTitleItem::AppName => "Application name",
             TerminalTitleItem::Project => "Project name (falls back to current directory name)",
             TerminalTitleItem::CurrentDir => "Current working directory",
             TerminalTitleItem::Spinner => {
@@ -121,7 +122,7 @@ impl TerminalTitleItem {
             TerminalTitleItem::WeeklyLimit => {
                 "Remaining usage on the secondary usage limit (omitted when unavailable)"
             }
-            TerminalTitleItem::CodexVersion => "Codex application version",
+            TerminalTitleItem::CodexVersion => "Application version",
             TerminalTitleItem::UsedTokens => "Total tokens used in session (omitted when zero)",
             TerminalTitleItem::TotalInputTokens => "Total input tokens used in session",
             TerminalTitleItem::TotalOutputTokens => "Total output tokens used in session",
@@ -339,16 +340,24 @@ impl TerminalTitleSetupView {
         preview_data: &StatusSurfacePreviewData,
     ) -> MultiSelectItem {
         let default_name = item.to_string();
-        let default_description = item.description();
+        let default_description = match item {
+            TerminalTitleItem::AppName => {
+                format!("{} app name", PRODUCT_IDENTITY.display_name)
+            }
+            TerminalTitleItem::CodexVersion => {
+                format!("{} application version", PRODUCT_IDENTITY.display_name)
+            }
+            _ => item.description().to_string(),
+        };
         let (name, description) = match item.preview_item() {
             Some(
                 preview_item @ (StatusSurfacePreviewItem::FiveHourLimit
                 | StatusSurfacePreviewItem::WeeklyLimit),
             ) => (
                 preview_data.rate_limit_item_name(preview_item, &default_name),
-                preview_data.rate_limit_item_description(preview_item, default_description),
+                preview_data.rate_limit_item_description(preview_item, &default_description),
             ),
-            _ => (default_name, default_description.to_string()),
+            _ => (default_name, default_description),
         };
 
         MultiSelectItem {

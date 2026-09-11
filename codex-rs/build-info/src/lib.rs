@@ -4,6 +4,7 @@ use std::fmt;
 use std::sync::OnceLock;
 
 use codex_install_context::InstallContext;
+use codex_product_identity::PRODUCT_IDENTITY;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
@@ -16,12 +17,30 @@ static BUILD_INFO: OnceLock<BuildInfo> = OnceLock::new();
 ///
 /// The environment lookup intentionally expands at the macro call site so Git
 /// changes invalidate only final binary actions, not this shared library.
-/// Cargo builds must supply STABLE_GIT_COMMIT in the build environment.
+/// Cargo builds supply provenance through their final-binary environment; Bazel
+/// final binaries receive the same values from the generated status file.
 #[macro_export]
 macro_rules! initialize {
     () => {
-        $crate::BuildInfo::initialize(option_env!("STABLE_GIT_COMMIT").unwrap_or("dev"));
+        $crate::BuildInfo::initialize_with_provenance(
+            option_env!("STABLE_GIT_COMMIT").unwrap_or("dev"),
+            option_env!("STABLE_UPSTREAM_GIT_COMMIT").unwrap_or("unknown"),
+            option_env!("MOEDEX_RELEASE_CHANNEL").unwrap_or("github"),
+        );
     };
+}
+
+/// Distribution provenance that distinguishes the Moedex release from its upstream base.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BuildProvenance {
+    /// Version assigned to this Moedex distribution.
+    pub distribution_version: Version,
+    /// Commit in the Moedex fork used to build this binary.
+    pub fork_commit: String,
+    /// Upstream Codex commit this distribution is based on.
+    pub upstream_commit: String,
+    /// Release channel that supplied this distribution.
+    pub release_channel: String,
 }
 
 /// The packaged release version and build provenance for the current runtime.
@@ -29,6 +48,10 @@ macro_rules! initialize {
 pub struct BuildInfo {
     version: Version,
     build_commit: String,
+    #[serde(default = "unknown_provenance")]
+    upstream_commit: String,
+    #[serde(default = "default_release_channel")]
+    release_channel: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     target: Option<String>,
 }
@@ -37,7 +60,7 @@ impl BuildInfo {
     /// Return build information for the current Codex runtime.
     pub fn get() -> Self {
         BUILD_INFO
-            .get_or_init(|| Self::resolve(InstallContext::current(), "dev"))
+            .get_or_init(|| Self::resolve(InstallContext::current(), "dev", "unknown", "github"))
             .clone()
     }
 
@@ -47,7 +70,24 @@ impl BuildInfo {
     /// invalidating the shared Rust library graph.
     #[doc(hidden)]
     pub fn initialize(build_commit: &'static str) {
-        let _ = BUILD_INFO.get_or_init(|| Self::resolve(InstallContext::current(), build_commit));
+        Self::initialize_with_provenance(build_commit, "unknown", "github");
+    }
+
+    /// Initialize build information using values stamped into the final executable.
+    #[doc(hidden)]
+    pub fn initialize_with_provenance(
+        build_commit: &'static str,
+        upstream_commit: &'static str,
+        release_channel: &'static str,
+    ) {
+        let _ = BUILD_INFO.get_or_init(|| {
+            Self::resolve(
+                InstallContext::current(),
+                build_commit,
+                upstream_commit,
+                release_channel,
+            )
+        });
     }
 
     /// Recover structured release information from a persisted version string.
@@ -64,11 +104,15 @@ impl BuildInfo {
                     "unknown".to_string()
                 },
                 version: parsed_version,
+                upstream_commit: unknown_provenance(),
+                release_channel: default_release_channel(),
                 target: None,
             },
             Err(_) => Self {
                 version: Version::new(0, 0, 0),
                 build_commit: version,
+                upstream_commit: unknown_provenance(),
+                release_channel: default_release_channel(),
                 target: None,
             },
         }
@@ -79,15 +123,9 @@ impl BuildInfo {
         &self.version
     }
 
-    /// Format the version for a user-facing Codex header.
+    /// Format the version for a user-facing Moedex header.
     pub fn display_version(&self) -> String {
-        if self.build_commit == "dev" {
-            "dev".to_string()
-        } else if self.is_source_build() {
-            format!("v{}", self.build_commit)
-        } else {
-            format!("v{}", self.version)
-        }
+        format!("{} {}", PRODUCT_IDENTITY.display_name, self)
     }
 
     /// Identify source builds without parsing their displayed Git commit.
@@ -105,11 +143,45 @@ impl BuildInfo {
         self.target.as_deref()
     }
 
-    fn resolve(install_context: &InstallContext, build_commit: &'static str) -> Self {
+    /// Return the release provenance while preserving raw compatibility accessors.
+    pub fn provenance(&self) -> BuildProvenance {
+        BuildProvenance {
+            distribution_version: self.version.clone(),
+            fork_commit: self.build_commit.clone(),
+            upstream_commit: self.upstream_commit.clone(),
+            release_channel: self.release_channel.clone(),
+        }
+    }
+
+    #[cfg(test)]
+    #[doc(hidden)]
+    pub fn for_test(
+        version: &str,
+        fork_commit: &str,
+        upstream_commit: &str,
+        release_channel: &str,
+    ) -> Self {
+        Self {
+            version: Version::parse(version).expect("valid test distribution version"),
+            build_commit: fork_commit.to_owned(),
+            upstream_commit: upstream_commit.to_owned(),
+            release_channel: release_channel.to_owned(),
+            target: None,
+        }
+    }
+
+    fn resolve(
+        install_context: &InstallContext,
+        build_commit: &'static str,
+        upstream_commit: &'static str,
+        release_channel: &'static str,
+    ) -> Self {
         if let Some(manifest) = install_context.package_manifest() {
             return Self {
                 version: manifest.version,
                 build_commit: build_commit.to_owned(),
+                upstream_commit: upstream_commit.to_owned(),
+                release_channel: release_channel.to_owned(),
                 target: Some(env!("CODEX_BUILD_TARGET").to_owned()),
             };
         }
@@ -117,9 +189,19 @@ impl BuildInfo {
         Self {
             version: Version::new(0, 0, 0),
             build_commit: build_commit.to_owned(),
+            upstream_commit: upstream_commit.to_owned(),
+            release_channel: release_channel.to_owned(),
             target: Some(env!("CODEX_BUILD_TARGET").to_owned()),
         }
     }
+}
+
+fn unknown_provenance() -> String {
+    "unknown".to_string()
+}
+
+fn default_release_channel() -> String {
+    "github".to_string()
 }
 
 /// Derive a standard build's opaque ID from its stamped commit and compiler target.

@@ -28,7 +28,7 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 fn codex_command(codex_home: &Path) -> Result<assert_cmd::Command> {
-    let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
+    let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("moedex")?);
     cmd.env("CODEX_HOME", codex_home);
     Ok(cmd)
 }
@@ -42,7 +42,7 @@ fn write_file_auth_config(codex_home: &Path) -> Result<()> {
 }
 
 fn read_auth_json(codex_home: &Path) -> Result<Value> {
-    let auth_json = std::fs::read_to_string(codex_home.join("auth.json"))?;
+    let auth_json = std::fs::read_to_string(codex_home.join("moedex-auth.json"))?;
     Ok(serde_json::from_str(&auth_json)?)
 }
 
@@ -75,7 +75,7 @@ fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
 fn login_status_reports_auth_storage_errors() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_file_auth_config(codex_home.path())?;
-    std::fs::write(codex_home.path().join("auth.json"), "{invalid json")?;
+    std::fs::write(codex_home.path().join("moedex-auth.json"), "{invalid json")?;
 
     codex_command(codex_home.path())?
         .args(["login", "status"])
@@ -175,7 +175,7 @@ fn logout_clears_only_the_selected_bedrock_provider() -> Result<()> {
             .success()
             .stderr(contains(expected_message));
 
-        assert!(!codex_home.path().join("auth.json").exists());
+        assert!(!codex_home.path().join("moedex-auth.json").exists());
         let actual_config: toml::Value = toml::from_str(&std::fs::read_to_string(&config_path)?)?;
         assert_eq!(actual_config, expected_config);
     }
@@ -291,7 +291,7 @@ async fn device_login_revokes_existing_auth_before_requesting_new_tokens() -> Re
     let codex_home = TempDir::new()?;
     write_file_auth_config(codex_home.path())?;
     std::fs::write(
-        codex_home.path().join("auth.json"),
+        codex_home.path().join("moedex-auth.json"),
         serde_json::to_vec(&json!({
             "auth_mode": "chatgpt",
             "OPENAI_API_KEY": null,

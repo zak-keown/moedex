@@ -1,0 +1,803 @@
+{
+  "schemaVersion": 1,
+  "product": "Moedex",
+  "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+  "gates": {
+    "manifest": {
+      "cwd": ".",
+      "argv": ["python3", "scripts/moedex_behavior_manifest.py", "verify"]
+    },
+    "identity": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-build-info",
+        "version_leads_with_distribution_and_retains_upstream_provenance"
+      ]
+    },
+    "home": {
+      "cwd": "codex-rs",
+      "argv": ["just", "test", "-p", "codex-utils-home-dir"]
+    },
+    "build-info": {
+      "cwd": "codex-rs",
+      "argv": ["just", "test", "-p", "codex-build-info"]
+    },
+    "login": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-login",
+        "-E",
+        "test(direct_auth_uses_moedex_service) | test(encrypted_auth_uses_moedex_service) | test(moedex_auto_fallback_in_a_shared_home_preserves_stock_auth) | test(moedex_file_auth_in_a_shared_compatibility_home_never_touches_stock_auth) | test(importing_file_auth_writes_only_the_destination_and_redacts_outcome)"
+      ]
+    },
+    "secrets": {
+      "cwd": "codex-rs",
+      "argv": ["just", "test", "-p", "codex-secrets"]
+    },
+    "app-server-daemon": {
+      "cwd": "codex-rs",
+      "argv": ["just", "test", "-p", "codex-app-server-daemon"]
+    },
+    "app-server-transport": {
+      "cwd": "codex-rs",
+      "argv": ["just", "test", "-p", "codex-app-server-transport"]
+    },
+    "app-server-protocol": {
+      "cwd": "codex-rs",
+      "argv": ["just", "test", "-p", "codex-app-server-protocol"]
+    },
+    "diagnostics": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-cli",
+        "-E",
+        "test(runtime_provenance_exposes_stamped_distribution_metadata) | test(effective_home_reports_default_and_competing_overrides) | test(compatibility_home_is_explicit_in_human_and_json_reports)"
+      ]
+    },
+    "exec-server": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-exec-server",
+        "-E",
+        "test(remote_executor_resolves_its_own_moedex_home) | test(environment_provider_from_codex_home_falls_back_when_file_is_missing) | test(environment_provider_from_codex_home_uses_present_environments_file) | test(helper_protocol_uses_path_uris)"
+      ]
+    },
+    "rollout": {
+      "cwd": "codex-rs",
+      "argv": ["just", "test", "-p", "codex-rollout"]
+    },
+    "import": {
+      "cwd": "codex-rs",
+      "argv": ["just", "test", "-p", "codex-external-agent-migration"]
+    },
+    "cli": {
+      "cwd": "codex-rs",
+      "argv": ["just", "test", "-p", "codex-cli", "clap_command_is_moedex"]
+    },
+    "tui": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "-E",
+        "test(terminal_title_preview_uses_moedex_identity) | test(welcome_copy_wraps_at_useful_widths) | test(startup_draft_renders_full_empty_and_multiline_composer_frames) | test(every_enabled_update_action_targets_moedex)"
+      ]
+    },
+    "model-identity": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-core",
+        "--test",
+        "all",
+        "product_identity::moedex_identity_is_added_once_without_rewriting_resumed_history",
+        "--",
+        "--exact"
+      ]
+    },
+    "package-unit": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "scripts/codex_package/test_layout.py",
+        "scripts/codex_package/test_release_workflows.py"
+      ]
+    },
+    "install-unix": {
+      "cwd": ".",
+      "argv": ["python3", "-m", "pytest", "scripts/install/test_install_sh.py"]
+    },
+    "install-windows": {
+      "cwd": ".",
+      "argv": ["python3", "-m", "pytest", "scripts/install/test_install_ps1.py"]
+    },
+    "doctor-updates": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-cli",
+        "doctor::updates::tests::update_action_labels_install_contexts"
+      ]
+    },
+    "package-journeys": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "scripts/moedex_behavior_manifest.py",
+        "package-journeys"
+      ]
+    },
+    "behavior-artifacts": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "scripts/moedex_behavior_manifest.py",
+        "verify",
+        "--artifact-dir",
+        "behavior-artifacts"
+      ]
+    },
+    "brand-inventory": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "scripts/codex_package/test_public_brand_inventory.py"
+      ]
+    }
+  },
+  "requirements": [
+    {
+      "id": "B1",
+      "requirement": "The public executable and generated command surfaces are named moedex.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["cli", "package-journeys"],
+      "artifacts": [
+        {
+          "paths": ["cli/bin/moedex", "cli/bin/moedex.exe"],
+          "executable": true
+        }
+      ],
+      "exclusions": [
+        "Internal codex-* crate and helper names remain compatibility identifiers."
+      ]
+    },
+    {
+      "id": "B2",
+      "requirement": "User-visible application identity is Moedex with retained upstream attribution.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["cli", "tui", "brand-inventory"],
+      "artifacts": [],
+      "exclusions": [
+        "OpenAI, ChatGPT, Codex Cloud, and model names remain provider or upstream labels."
+      ]
+    },
+    {
+      "id": "B3",
+      "requirement": "Home precedence is MOEDEX_HOME, CODEX_HOME compatibility, then ~/.moedex.",
+      "status": "superseded",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["home", "diagnostics"],
+      "artifacts": [],
+      "exclusions": [
+        "Repository-local .codex configuration retains its compatibility name."
+      ]
+    },
+    {
+      "id": "B4",
+      "requirement": "Same-host runtime state is isolated while remote hosts resolve their own home.",
+      "status": "superseded",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["app-server-daemon", "app-server-transport", "exec-server"],
+      "artifacts": [
+        {
+          "paths": [
+            "cli/bin/codex-code-mode-host",
+            "cli/bin/codex-code-mode-host.exe"
+          ],
+          "executable": true
+        }
+      ],
+      "exclusions": [
+        "Remote filesystem paths are host-local and are not asserted by archive layout."
+      ]
+    },
+    {
+      "id": "B5",
+      "requirement": "Codex import is explicit, preview-first, copy-only, and credentials default off.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["import"],
+      "artifacts": [],
+      "exclusions": [
+        "First-launch prompting is deferred; the explicit import command is the supported entrypoint."
+      ]
+    },
+    {
+      "id": "B6",
+      "requirement": "Settings and sessions import through typed and rollout-aware adapters.",
+      "status": "superseded",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["import", "rollout"],
+      "artifacts": [],
+      "exclusions": [
+        "Unsupported source items are reported and excluded rather than rewritten."
+      ]
+    },
+    {
+      "id": "B7",
+      "requirement": "Credentials use Moedex-owned storage and migrate only through storage adapters.",
+      "status": "superseded",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["login", "secrets", "import"],
+      "artifacts": [],
+      "exclusions": [
+        "Provider credential formats and sign-in names remain provider-owned."
+      ]
+    },
+    {
+      "id": "B8",
+      "requirement": "Updates and install guidance use the zak-keown/moedex GitHub release channel.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "doctor-updates",
+        "package-unit",
+        "install-unix",
+        "install-windows"
+      ],
+      "artifacts": [],
+      "exclusions": [
+        "npm, Homebrew, WinGet, R2, and upstream documentation publication are disabled channels."
+      ]
+    },
+    {
+      "id": "B9",
+      "requirement": "Release archives are complete, checksummed, provenance-bound, and qualified on six targets.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["package-unit", "package-journeys", "behavior-artifacts"],
+      "artifacts": [
+        {
+          "paths": ["cli/codex-package.json"],
+          "executable": false
+        },
+        {
+          "paths": ["app-server/codex-package.json"],
+          "executable": false
+        }
+      ],
+      "exclusions": [
+        "Signing and publication require separate protected release gates."
+      ]
+    },
+    {
+      "id": "B10",
+      "requirement": "Version output leads with Moedex and retains fork and upstream provenance.",
+      "status": "preserved",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["identity", "build-info", "diagnostics"],
+      "artifacts": [],
+      "exclusions": [
+        "Protocol compatibility versions retain their established Codex field names."
+      ]
+    },
+    {
+      "id": "B11",
+      "requirement": "Protocol, rollout, transport, exec-server, and app-server compatibility are preserved.",
+      "status": "preserved",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": [
+        "app-server-protocol",
+        "app-server-transport",
+        "exec-server",
+        "rollout"
+      ],
+      "artifacts": [
+        {
+          "paths": [
+            "app-server/bin/codex-app-server",
+            "app-server/bin/codex-app-server.exe"
+          ],
+          "executable": true
+        }
+      ],
+      "exclusions": [
+        "Internal wire methods, fields, helper names, and rollout records remain Codex-compatible."
+      ]
+    },
+    {
+      "id": "B12",
+      "requirement": "Model-visible identity says Moedex exactly once across fresh and resumed sessions.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["model-identity"],
+      "artifacts": [],
+      "exclusions": [
+        "Historical rollout bytes and truthful provider names are preserved."
+      ]
+    },
+    {
+      "id": "B13",
+      "requirement": "Install and uninstall coexist with stock Codex and preserve both products data.",
+      "status": "intentional-change",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["install-unix", "install-windows"],
+      "artifacts": [],
+      "exclusions": [
+        "Data deletion is a separate manual action after effective-home confirmation."
+      ]
+    },
+    {
+      "id": "U4",
+      "requirement": "Fork-only identity and state changes preserve provider and protocol semantics.",
+      "status": "preserved",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["app-server-protocol", "secrets", "rollout"],
+      "artifacts": [],
+      "exclusions": [
+        "Fork branding does not rename provider or compatibility contracts."
+      ]
+    },
+    {
+      "id": "U5",
+      "requirement": "Qualification detects mapped behavior loss and upstream update-channel adoption.",
+      "status": "preserved",
+      "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
+      "tests": ["manifest"],
+      "artifacts": [],
+      "exclusions": [
+        "Upstream attribution and compatibility references are allowed outside update/publication targets."
+      ]
+    }
+  ],
+  "sourceInventory": {
+    "files": [
+      "codex-cli/bin/codex.js",
+      "codex-cli/package.json",
+      "scripts/install/install.sh",
+      "scripts/install/install.ps1",
+      "scripts/codex_package/layout.py",
+      "codex-rs/cli/src/doctor/updates.rs",
+      "codex-rs/tui/src/updates.rs",
+      "codex-rs/tui/src/update_action.rs",
+      "codex-rs/tui/src/update_prompt.rs",
+      "codex-rs/product-identity/src/lib.rs",
+      ".github/workflows/moedex-qualification.yml",
+      ".github/workflows/rust-release.yml",
+      ".github/workflows/rust-release-windows.yml",
+      ".github/workflows/rust-release-prepare.yml",
+      ".github/workflows/rust-release-argument-comment-lint.yml",
+      ".github/workflows/rust-release-provisioned-macos.yml",
+      ".github/workflows/r2-release.yml",
+      ".github/workflows/python-runtime-release.yml",
+      ".github/workflows/python-sdk-cli-release.yml",
+      ".github/workflows/python-sdk-release.yml",
+      ".github/workflows/rust-release-zsh.yml",
+      ".github/workflows/rusty-v8-release.yml",
+      "codex-cli/scripts/build_npm_package.py",
+      "scripts/codex_package/codex-zsh",
+      ".github/scripts/export-release-provenance.sh",
+      "codex-rs/tui/src/history_cell/notices.rs",
+      "codex-rs/tui/src/updates_cache_tests.rs",
+      "codex-rs/tui/src/update_versions.rs",
+      "codex-rs/tui/src/updates_cache.rs"
+    ],
+    "expectations": [
+      {
+        "path": "codex-cli/bin/codex.js",
+        "literal": "@zak-keown/moedex",
+        "count": 14
+      },
+      {
+        "path": "codex-cli/package.json",
+        "literal": "@zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "codex-cli/package.json",
+        "literal": "github.com/zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "scripts/install/install.sh",
+        "literal": "github.com/zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "scripts/install/install.sh",
+        "literal": "api.github.com/repos/zak-keown/moedex",
+        "count": 2
+      },
+      {
+        "path": "scripts/install/install.ps1",
+        "literal": "api.github.com/repos/zak-keown/moedex",
+        "count": 2
+      },
+      {
+        "path": "scripts/codex_package/layout.py",
+        "literal": "zak-keown/moedex",
+        "count": 2
+      },
+      {
+        "path": "codex-rs/cli/src/doctor/updates.rs",
+        "literal": "api.github.com/repos/zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "codex-rs/cli/src/doctor/updates.rs",
+        "literal": "GitHub Releases (zak-keown/moedex)",
+        "count": 4
+      },
+      {
+        "path": "codex-rs/tui/src/updates.rs",
+        "literal": "api.github.com/repos/zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "codex-rs/tui/src/update_action.rs",
+        "literal": "github.com/zak-keown/moedex",
+        "count": 3
+      },
+      {
+        "path": "codex-rs/tui/src/update_prompt.rs",
+        "literal": "github.com/zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "codex-rs/product-identity/src/lib.rs",
+        "literal": "zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/moedex-qualification.yml",
+        "literal": "https://github.com/openai/codex.git",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rust-release.yml",
+        "literal": "github.repository == 'zak-keown/moedex'",
+        "count": 5
+      },
+      {
+        "path": ".github/workflows/rust-release.yml",
+        "literal": "moedex-behavior-evidence-*",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rust-release-windows.yml",
+        "literal": "WINDOWS_BINARIES: \"moedex",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rust-release-prepare.yml",
+        "literal": "github.repository == 'zak-keown/moedex'",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rust-release-argument-comment-lint.yml",
+        "literal": "workflow_call:",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rust-release-provisioned-macos.yml",
+        "literal": "workflow_call:",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/r2-release.yml",
+        "literal": "CODEX_R2_",
+        "count": 4
+      },
+      {
+        "path": ".github/workflows/python-runtime-release.yml",
+        "literal": "github.repository == 'openai/codex'",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/python-sdk-cli-release.yml",
+        "literal": "github.repository == 'openai/codex'",
+        "count": 2
+      },
+      {
+        "path": ".github/workflows/python-sdk-release.yml",
+        "literal": "github.repository == 'openai/codex'",
+        "count": 2
+      },
+      {
+        "path": ".github/workflows/rust-release-zsh.yml",
+        "literal": "${GITHUB_REPOSITORY}",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rusty-v8-release.yml",
+        "literal": "${GITHUB_REPOSITORY}",
+        "count": 3
+      },
+      {
+        "path": "codex-cli/scripts/build_npm_package.py",
+        "literal": "@zak-keown/moedex",
+        "count": 7
+      },
+      {
+        "path": "scripts/codex_package/codex-zsh",
+        "literal": "github.com/zak-keown/moedex",
+        "count": 4
+      },
+      {
+        "path": ".github/scripts/export-release-provenance.sh",
+        "literal": "https://github.com/openai/codex.git",
+        "count": 1
+      },
+      {
+        "path": ".github/scripts/export-release-provenance.sh",
+        "literal": "MOEDEX_RELEASE_CHANNEL=github",
+        "count": 1
+      },
+      {
+        "path": "codex-rs/tui/src/history_cell/notices.rs",
+        "literal": "github.com/zak-keown/moedex",
+        "count": 4
+      }
+    ],
+    "forbiddenRegex": [
+      {
+        "path": "codex-cli/bin/codex.js",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-cli/bin/codex.js",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-cli/bin/codex.js",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-cli/package.json",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-cli/package.json",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-cli/package.json",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "scripts/install/install.sh",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "scripts/install/install.sh",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "scripts/install/install.sh",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "scripts/install/install.ps1",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "scripts/install/install.ps1",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "scripts/install/install.ps1",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/cli/src/doctor/updates.rs",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/cli/src/doctor/updates.rs",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/cli/src/doctor/updates.rs",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/updates.rs",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/tui/src/updates.rs",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/updates.rs",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/update_action.rs",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/tui/src/update_action.rs",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/update_action.rs",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/update_prompt.rs",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/tui/src/update_prompt.rs",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/update_prompt.rs",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": ".github/workflows/rust-release.yml",
+        "pattern": "vars\\.MOEDEX_ENABLE_(?:R2|DOTSLASH|NPM|WEBSITE|WINGET|BRANCH)"
+      },
+      {
+        "path": "codex-cli/scripts/build_npm_package.py",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-cli/scripts/build_npm_package.py",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-cli/scripts/build_npm_package.py",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/history_cell/notices.rs",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/tui/src/history_cell/notices.rs",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/history_cell/notices.rs",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/update_versions.rs",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/tui/src/update_versions.rs",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/update_versions.rs",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/updates_cache.rs",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/tui/src/updates_cache.rs",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/updates_cache.rs",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/updates_cache_tests.rs",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/tui/src/updates_cache_tests.rs",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/updates_cache_tests.rs",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "scripts/codex_package/codex-zsh",
+        "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "scripts/codex_package/codex-zsh",
+        "pattern": "(?:npm\\s+install|pnpm\\s+add|bun\\s+install|vp\\s+install)[^\\n]*@openai/codex"
+      },
+      {
+        "path": "scripts/codex_package/codex-zsh",
+        "pattern": "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      }
+    ],
+    "discoveryGlobs": [
+      "codex-cli/bin/codex.js",
+      "codex-cli/package.json",
+      "codex-cli/scripts/build_npm_package.py",
+      "scripts/install/install.*",
+      "scripts/codex_package/layout.py",
+      "scripts/codex_package/codex-zsh",
+      "codex-rs/cli/src/doctor/updates.rs",
+      "codex-rs/tui/src/update*.rs",
+      "codex-rs/tui/src/**/notices.rs",
+      "codex-rs/product-identity/src/lib.rs",
+      ".github/scripts/export-release-provenance.sh",
+      ".github/workflows/moedex-qualification.yml",
+      ".github/workflows/*release*.yml"
+    ],
+    "policyScan": {
+      "roots": [".github", "scripts", "codex-cli", "codex-rs"],
+      "extensions": [
+        "",
+        ".bzl",
+        ".js",
+        ".json",
+        ".ps1",
+        ".py",
+        ".rs",
+        ".sh",
+        ".toml",
+        ".yaml",
+        ".yml"
+      ],
+      "excludedDirectories": [
+        ".venv",
+        "fixtures",
+        "node_modules",
+        "snapshots",
+        "target",
+        "testdata",
+        "tests",
+        "vendor"
+      ],
+      "excludedFileGlobs": [
+        "**/*_test.py",
+        "**/*_tests.rs",
+        "**/test_*.py",
+        "**/tests.rs"
+      ],
+      "forbiddenRegex": [
+        "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)",
+        "(?:npm\\s+(?:install|publish)|pnpm\\s+(?:add|publish)|bun\\s+(?:install|publish)|vp\\s+install)[^\\n]*@openai/codex",
+        "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      ],
+      "allowedOccurrences": [
+        {
+          "path": "scripts/codex_package/v8.py",
+          "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)",
+          "count": 1
+        },
+        {
+          "path": ".github/actions/setup-rusty-v8/action.yml",
+          "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)",
+          "count": 1
+        }
+      ]
+    }
+  }
+}

@@ -51,15 +51,17 @@ def assemble(
     if targets.get(app_target) != voice_target:
         raise ValueError("incompatible app and helper targets")
     suffix = ".exe" if app_target.endswith("windows-msvc") else ""
-    entrypoint = f"bin/codex{suffix}"
+    entrypoint = metadata.get("entrypoint")
+    allowed_entrypoints = {f"bin/codex{suffix}", f"bin/moedex{suffix}"}
     expected = {
         "layoutVersion": 1,
         "variant": "codex",
-        "entrypoint": entrypoint,
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
     }
-    if any(metadata.get(key) != value for key, value in expected.items()):
+    if entrypoint not in allowed_entrypoints or any(
+        metadata.get(key) != value for key, value in expected.items()
+    ):
         raise ValueError("input is not a canonical Codex package")
     if release_version is None:
         if not metadata["version"].endswith(f"+{commit}"):

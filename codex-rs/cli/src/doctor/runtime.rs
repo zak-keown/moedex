@@ -7,6 +7,8 @@
 
 use std::env;
 
+use codex_build_info::BuildInfo;
+use codex_build_info::BuildProvenance;
 use codex_install_context::InstallContext;
 use codex_install_context::InstallMethod;
 
@@ -22,21 +24,30 @@ use super::push_path_detail;
 /// install state is reported by the installation and update checks instead.
 pub(super) fn runtime_check() -> DoctorCheck {
     let current_exe = env::current_exe().ok();
-    let install_context = doctor_install_context(current_exe.as_deref());
+    runtime_check_with_provenance(BuildInfo::get().provenance(), current_exe.as_deref())
+}
+
+fn runtime_check_with_provenance(
+    provenance: BuildProvenance,
+    current_exe: Option<&std::path::Path>,
+) -> DoctorCheck {
+    let install_context = doctor_install_context(current_exe);
     let os = env::consts::OS;
     let arch = env::consts::ARCH;
     let platform = format!("{os}-{arch}");
     let install_method = install_method_name(&install_context);
     let mut details = vec![
-        format!("version: {}", env!("CARGO_PKG_VERSION")),
+        format!("distribution version: {}", provenance.distribution_version),
         format!("platform: {platform}"),
         format!(
             "install method: {}",
             describe_install_context(&install_context)
         ),
-        format!("commit: {}", build_commit()),
+        format!("fork commit: {}", provenance.fork_commit),
+        format!("upstream base: {}", provenance.upstream_commit),
+        format!("release channel: {}", provenance.release_channel),
     ];
-    push_path_detail(&mut details, "current executable", current_exe.as_deref());
+    push_path_detail(&mut details, "current executable", current_exe);
 
     DoctorCheck::new(
         "runtime.provenance",
@@ -138,8 +149,89 @@ fn search_provider(context: &InstallContext) -> &'static str {
     }
 }
 
-fn build_commit() -> &'static str {
-    option_env!("CODEX_BUILD_COMMIT")
-        .or(option_env!("GIT_COMMIT"))
-        .unwrap_or("unknown")
+#[cfg(test)]
+mod tests {
+    use super::super::CheckStatus;
+    use super::super::DoctorReport;
+    use super::super::output::HumanOutputOptions;
+    use super::super::output::render_human_report;
+    use super::super::redacted_json_report;
+    use super::runtime_check_with_provenance;
+    use codex_build_info::BuildProvenance;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn runtime_provenance_exposes_stamped_distribution_metadata() {
+        let check = runtime_check_with_provenance(
+            BuildProvenance {
+                distribution_version: "1.2.3".parse().expect("valid version"),
+                fork_commit: "fork-commit".to_string(),
+                upstream_commit: "upstream-base".to_string(),
+                release_channel: "github".to_string(),
+            },
+            /*current_exe*/ None,
+        );
+
+        assert_eq!(
+            check.details,
+            vec![
+                "distribution version: 1.2.3".to_string(),
+                format!(
+                    "platform: {}-{}",
+                    std::env::consts::OS,
+                    std::env::consts::ARCH
+                ),
+                "install method: other".to_string(),
+                "fork commit: fork-commit".to_string(),
+                "upstream base: upstream-base".to_string(),
+                "release channel: github".to_string(),
+                "current executable: none".to_string(),
+            ]
+        );
+
+        let report = DoctorReport {
+            schema_version: 1,
+            generated_at: "test".to_string(),
+            overall_status: CheckStatus::Ok,
+            codex_version: "1.2.3".to_string(),
+            checks: vec![check],
+        };
+        let human = render_human_report(
+            &report,
+            HumanOutputOptions {
+                show_details: true,
+                show_all: false,
+                ascii: true,
+                color_enabled: false,
+            },
+        );
+        for value in ["1.2.3", "fork-commit", "upstream-base", "github"] {
+            assert!(human.contains(value), "missing {value} from:\n{human}");
+        }
+        let json = serde_json::to_value(redacted_json_report(&report)).expect("serialize report");
+        assert_eq!(
+            json["checks"]["runtime.provenance"]["details"]["distribution version"],
+            "1.2.3"
+        );
+        assert_eq!(
+            json["checks"]["runtime.provenance"]["details"]["version"],
+            "1.2.3"
+        );
+        assert_eq!(
+            json["checks"]["runtime.provenance"]["details"]["fork commit"],
+            "fork-commit"
+        );
+        assert_eq!(
+            json["checks"]["runtime.provenance"]["details"]["commit"],
+            "fork-commit"
+        );
+        assert_eq!(
+            json["checks"]["runtime.provenance"]["details"]["upstream base"],
+            "upstream-base"
+        );
+        assert_eq!(
+            json["checks"]["runtime.provenance"]["details"]["release channel"],
+            "github"
+        );
+    }
 }

@@ -64,7 +64,7 @@ def build_plugin_json(
         "interface": {
             "displayName": display_name,
             "shortDescription": f"Use {display_name} in Codex.",
-            "longDescription": f"{display_name} adds a local Codex plugin scaffold.",
+            "longDescription": f"{display_name} adds a local Moedex plugin scaffold.",
             "developerName": "Local developer",
             "category": DEFAULT_CATEGORY,
             "capabilities": [],

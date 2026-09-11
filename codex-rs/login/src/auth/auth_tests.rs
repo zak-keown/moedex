@@ -1,6 +1,5 @@
 use super::*;
 use crate::auth::storage::FileAuthStorage;
-use crate::auth::storage::get_auth_file;
 use crate::token_data::IdTokenInfo;
 use codex_protocol::account::PlanType as AccountPlanType;
 use codex_protocol::auth::AuthMode;
@@ -93,7 +92,7 @@ async fn refresh_without_id_token() {
 #[test]
 fn login_with_api_key_overwrites_existing_auth_json() {
     let dir = tempdir().unwrap();
-    let auth_path = dir.path().join("auth.json");
+    let auth_path = dir.path().join("moedex-auth.json");
     let stale_auth = json!({
         "OPENAI_API_KEY": "sk-old",
         "tokens": {
@@ -129,7 +128,7 @@ fn login_with_api_key_overwrites_existing_auth_json() {
 #[serial(codex_auth_env)]
 async fn login_with_access_token_writes_agent_identity_jwt() {
     let dir = tempdir().unwrap();
-    let auth_path = dir.path().join("auth.json");
+    let auth_path = dir.path().join("moedex-auth.json");
     let record = agent_identity_record(WORKSPACE_ID_ALLOWED);
     let agent_identity =
         signed_agent_identity_jwt(&record, json!(record.plan_type)).expect("signed agent identity");
@@ -192,7 +191,7 @@ async fn login_with_access_token_rejects_agent_identity_workspace_mismatch() {
     .expect_err("agent identity workspace mismatch should fail");
 
     assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
-    assert!(!get_auth_file(dir.path()).exists());
+    assert!(!dir.path().join("moedex-auth.json").exists());
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
@@ -396,7 +395,7 @@ async fn stored_agent_identity_jwt_keeps_auth_json_unchanged() -> anyhow::Result
     assert_eq!(agent_identity_auth.run_task_id(), "task-id");
     let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
     let auth = storage
-        .try_read_auth_json(&get_auth_file(codex_home.path()))
+        .try_read_auth_json(&codex_home.path().join("moedex-auth.json"))
         .expect("auth.json should parse");
     assert_eq!(
         auth.agent_identity,
@@ -410,7 +409,7 @@ async fn stored_agent_identity_jwt_keeps_auth_json_unchanged() -> anyhow::Result
 #[serial(codex_auth_env)]
 async fn login_with_access_token_writes_only_personal_access_token() {
     let dir = tempdir().unwrap();
-    let auth_path = dir.path().join("auth.json");
+    let auth_path = dir.path().join("moedex-auth.json");
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v1/user-auth-credential/whoami"))
@@ -492,7 +491,7 @@ async fn login_with_access_token_rejects_personal_access_token_workspace_mismatc
 
     assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     assert!(
-        !get_auth_file(dir.path()).exists(),
+        !dir.path().join("moedex-auth.json").exists(),
         "workspace mismatch should not write auth.json"
     );
     server.verify().await;
@@ -525,7 +524,7 @@ async fn login_with_access_token_rejects_invalid_personal_access_token() {
 
     assert_eq!(err.kind(), std::io::ErrorKind::Other);
     assert!(
-        !get_auth_file(dir.path()).exists(),
+        !dir.path().join("moedex-auth.json").exists(),
         "invalid personal access token should not write auth.json"
     );
     server.verify().await;
@@ -549,7 +548,7 @@ async fn login_with_access_token_rejects_invalid_jwt() {
 
     assert_eq!(err.kind(), std::io::ErrorKind::Other);
     assert!(
-        !get_auth_file(dir.path()).exists(),
+        !dir.path().join("moedex-auth.json").exists(),
         "invalid access token should not write auth.json"
     );
 }
@@ -817,7 +816,7 @@ async fn chatgpt_auth_task_registration_retry_exhaustion_is_fallback_eligible() 
     record.chatgpt_user_id = "user-12345".to_string();
     record.email = Some("user@example.com".to_string());
     let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
-    let auth_path = get_auth_file(codex_home.path());
+    let auth_path = codex_home.path().join("moedex-auth.json");
     let mut auth_json = storage.try_read_auth_json(&auth_path)?;
     auth_json.agent_identity = Some(AgentIdentityStorage::Record(record.clone()));
     storage.save(&auth_json)?;
@@ -986,7 +985,7 @@ async fn login_with_access_token_rejects_unsigned_jwt() {
     .expect_err("unsigned access token should fail");
 
     assert!(
-        !get_auth_file(dir.path()).exists(),
+        !dir.path().join("moedex-auth.json").exists(),
         "unsigned access token should not write auth.json"
     );
     server.verify().await;
@@ -1081,7 +1080,7 @@ async fn pro_account_with_no_api_key_uses_chatgpt_auth() {
 async fn loads_api_key_from_auth_json() {
     let dir = tempdir().unwrap();
     let _access_token_guard = remove_access_token_env_var();
-    let auth_file = dir.path().join("auth.json");
+    let auth_file = dir.path().join("moedex-auth.json");
     std::fs::write(
         auth_file,
         r#"{"OPENAI_API_KEY":"sk-test-key","tokens":null,"last_refresh":null}"#,
@@ -1127,7 +1126,7 @@ fn logout_removes_auth_file() -> Result<(), std::io::Error> {
         AuthCredentialsStoreMode::File,
         AuthKeyringBackendKind::default(),
     )?;
-    let auth_file = get_auth_file(dir.path());
+    let auth_file = dir.path().join("moedex-auth.json");
     assert!(auth_file.exists());
     assert!(logout(
         dir.path(),
@@ -1618,7 +1617,7 @@ async fn workload_identity_auth_is_immutable_and_process_local() {
     assert!(manager.has_external_auth());
     assert_eq!(manager.auth_cached(), Some(auth));
 
-    assert!(!get_auth_file(codex_home.path()).exists());
+    assert!(!codex_home.path().join("moedex-auth.json").exists());
     let ephemeral_storage = create_auth_storage(
         codex_home.path().to_path_buf(),
         AuthCredentialsStoreMode::Ephemeral,
@@ -1776,7 +1775,7 @@ struct AuthFileParams {
 
 fn write_auth_file(params: AuthFileParams, codex_home: &Path) -> std::io::Result<String> {
     let fake_jwt = fake_jwt_for_auth_file_params(&params)?;
-    let auth_file = get_auth_file(codex_home);
+    let auth_file = codex_home.join("moedex-auth.json");
     let auth_json_data = json!({
         "OPENAI_API_KEY": params.openai_api_key,
         "tokens": {
@@ -2024,7 +2023,7 @@ async fn load_auth_reads_access_token_from_env() {
     assert_eq!(agent_identity.record(), &expected_record);
     assert_eq!(agent_identity.run_task_id(), "task-123");
     assert!(
-        !get_auth_file(codex_home.path()).exists(),
+        !codex_home.path().join("moedex-auth.json").exists(),
         "env auth should not write auth.json"
     );
     server.verify().await;
@@ -2083,7 +2082,7 @@ async fn load_auth_reads_personal_access_token_from_env() {
         assert!(auth.is_fedramp_account());
     }
     assert!(
-        !get_auth_file(codex_home.path()).exists(),
+        !codex_home.path().join("moedex-auth.json").exists(),
         "env auth should not write auth.json"
     );
     server.verify().await;
@@ -2269,7 +2268,7 @@ async fn enforce_login_restrictions_logs_out_for_method_mismatch() {
         .expect_err("expected method mismatch to error");
     assert!(err.to_string().contains("ChatGPT login is required"));
     assert!(
-        !codex_home.path().join("auth.json").exists(),
+        !codex_home.path().join("moedex-auth.json").exists(),
         "auth.json should be removed on mismatch"
     );
 }
@@ -2422,7 +2421,7 @@ async fn workspace_policy_checks_the_selected_request_account() {
         codex_home.path(),
     )
     .expect("seed ChatGPT credentials");
-    let auth_path = codex_home.path().join("auth.json");
+    let auth_path = codex_home.path().join("moedex-auth.json");
     let mut stored: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&auth_path).unwrap()).unwrap();
     stored["tokens"]["account_id"] = json!(WORKSPACE_ID_DISALLOWED);
@@ -2471,7 +2470,7 @@ async fn enforce_login_restrictions_logs_out_for_workspace_mismatch() {
             .contains(&format!("workspace(s) {WORKSPACE_ID_ALLOWED}"))
     );
     assert!(
-        !codex_home.path().join("auth.json").exists(),
+        !codex_home.path().join("moedex-auth.json").exists(),
         "auth.json should be removed on mismatch"
     );
 }
@@ -2522,7 +2521,7 @@ async fn enforce_login_restrictions_logs_out_for_personal_access_token_workspace
         "current credentials belong to {WORKSPACE_ID_DISALLOWED}"
     )));
     assert!(
-        !codex_home.path().join("auth.json").exists(),
+        !codex_home.path().join("moedex-auth.json").exists(),
         "auth.json should be removed on mismatch"
     );
     server.verify().await;
@@ -2554,7 +2553,7 @@ async fn enforce_login_restrictions_allows_matching_workspace() {
         .await
         .expect("matching workspace should succeed");
     assert!(
-        codex_home.path().join("auth.json").exists(),
+        codex_home.path().join("moedex-auth.json").exists(),
         "auth.json should remain when restrictions pass"
     );
 }
@@ -2655,7 +2654,7 @@ async fn enforce_login_restrictions_logs_out_for_agent_identity_workspace_mismat
         "{message}"
     );
     assert!(
-        !codex_home.path().join("auth.json").exists(),
+        !codex_home.path().join("moedex-auth.json").exists(),
         "auth.json should be removed on mismatch"
     );
     server.verify().await;
@@ -2686,7 +2685,7 @@ async fn enforce_login_restrictions_allows_api_key_if_login_method_not_set_but_f
         .await
         .expect("matching workspace should succeed");
     assert!(
-        codex_home.path().join("auth.json").exists(),
+        codex_home.path().join("moedex-auth.json").exists(),
         "auth.json should remain when restrictions pass"
     );
 }

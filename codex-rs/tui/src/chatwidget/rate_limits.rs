@@ -532,7 +532,7 @@ impl ChatWidget {
             ),
             AddCreditsNudgeCreditType::UsageLimit => (
                 "Usage limit reached",
-                "Request a limit increase from your owner to continue using codex. Request increase?",
+                "Request a limit increase from your owner to continue using Moedex. Request increase?",
             ),
         };
         let send_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {

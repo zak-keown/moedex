@@ -5,66 +5,72 @@ use codex_install_context::InstallMethod;
 #[cfg(any(not(debug_assertions), test))]
 use codex_install_context::StandalonePlatform;
 
+const RELEASE_URL: &str = "https://github.com/zak-keown/moedex/releases/latest";
+
 /// Update action the CLI should perform after the TUI exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateAction {
-    /// Update via `npm install -g @openai/codex@latest`.
-    NpmGlobalLatest,
-    /// Update via `bun install -g @openai/codex@latest`.
-    BunGlobalLatest,
-    /// Update via `vp install -g @openai/codex@latest`.
-    VitePlusGlobalLatest,
-    /// Update via `pnpm add -g @openai/codex@latest`.
-    PnpmGlobalLatest,
-    /// Update via `brew upgrade codex`.
-    BrewUpgrade,
-    /// Update via `curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh`.
-    StandaloneUnix,
-    /// Update via `$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex`.
-    StandaloneWindows,
+    /// Install the latest Unix artifact published by the Moedex fork.
+    GitHubReleaseUnix,
+    /// Install the latest Windows artifact published by the Moedex fork.
+    GitHubReleaseWindows,
+    /// No updater is configured for the detected installation method.
+    Disabled { release_url: &'static str },
 }
 
 impl UpdateAction {
     #[cfg(any(not(debug_assertions), test))]
-    pub(crate) fn from_install_context(context: &InstallContext) -> Option<Self> {
+    pub(crate) fn from_install_context(context: &InstallContext) -> Self {
         match &context.method {
-            InstallMethod::Npm => Some(UpdateAction::NpmGlobalLatest),
-            InstallMethod::Bun => Some(UpdateAction::BunGlobalLatest),
-            InstallMethod::VitePlus => Some(UpdateAction::VitePlusGlobalLatest),
-            InstallMethod::Pnpm => Some(UpdateAction::PnpmGlobalLatest),
-            InstallMethod::Brew => Some(UpdateAction::BrewUpgrade),
-            InstallMethod::Standalone { platform, .. } => Some(match platform {
-                StandalonePlatform::Unix => UpdateAction::StandaloneUnix,
-                StandalonePlatform::Windows => UpdateAction::StandaloneWindows,
-            }),
-            InstallMethod::Other => None,
+            InstallMethod::Standalone { platform, .. } => match platform {
+                StandalonePlatform::Unix => Self::GitHubReleaseUnix,
+                StandalonePlatform::Windows => Self::GitHubReleaseWindows,
+            },
+            InstallMethod::Npm
+            | InstallMethod::Bun
+            | InstallMethod::VitePlus
+            | InstallMethod::Pnpm
+            | InstallMethod::Brew
+            | InstallMethod::Other => Self::Disabled {
+                release_url: RELEASE_URL,
+            },
         }
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn enabled(self) -> Option<Self> {
+        match self {
+            Self::GitHubReleaseUnix | Self::GitHubReleaseWindows => Some(self),
+            Self::Disabled { .. } => None,
+        }
+    }
+
+    /// Returns the enabled update actions for invariant tests.
+    #[cfg(test)]
+    pub(crate) fn supported_for_tests() -> [Self; 2] {
+        [Self::GitHubReleaseUnix, Self::GitHubReleaseWindows]
     }
 
     /// Returns the list of command-line arguments for invoking the update.
     pub fn command_args(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/codex"]),
-            UpdateAction::VitePlusGlobalLatest => ("vp", &["install", "-g", "@openai/codex"]),
-            UpdateAction::PnpmGlobalLatest => ("pnpm", &["add", "-g", "@openai/codex"]),
-            UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "codex"]),
-            UpdateAction::StandaloneUnix => (
+            Self::GitHubReleaseUnix => (
                 "sh",
                 &[
                     "-c",
-                    "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
+                    "curl -fsSL https://github.com/zak-keown/moedex/releases/latest/download/install.sh | MOEDEX_NON_INTERACTIVE=1 sh",
                 ],
             ),
-            UpdateAction::StandaloneWindows => (
+            Self::GitHubReleaseWindows => (
                 "powershell",
                 &[
                     "-ExecutionPolicy",
                     "Bypass",
                     "-c",
-                    "$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex",
+                    "$env:MOEDEX_NON_INTERACTIVE=1; irm https://github.com/zak-keown/moedex/releases/latest/download/install.ps1 | iex",
                 ],
             ),
+            Self::Disabled { .. } => ("open", &[RELEASE_URL]),
         }
     }
 
@@ -78,7 +84,7 @@ impl UpdateAction {
 
 #[cfg(not(debug_assertions))]
 pub fn get_update_action() -> Option<UpdateAction> {
-    UpdateAction::from_install_context(InstallContext::current())
+    UpdateAction::from_install_context(InstallContext::current()).enabled()
 }
 
 #[cfg(test)]
@@ -88,46 +94,39 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn maps_install_context_to_update_action() {
+    fn every_enabled_update_action_targets_moedex() {
+        for action in UpdateAction::supported_for_tests() {
+            let command = action.command_str();
+            assert!(command.contains("zak-keown/moedex"), "{command}");
+            assert!(!command.contains("@openai/codex"), "{command}");
+            assert!(!command.contains("brew upgrade --cask codex"), "{command}");
+            assert!(!command.contains("chatgpt.com/codex"), "{command}");
+        }
+    }
+
+    #[test]
+    fn maps_only_standalone_installs_to_enabled_update_actions() {
         let native_release_dir =
             AbsolutePathBuf::from_absolute_path(std::env::temp_dir().join("native-release"))
                 .expect("temp dir path should be absolute");
-
-        assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Other,
-                package_layout: None,
-            }),
-            None
-        );
-        assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Npm,
-                package_layout: None,
-            }),
-            Some(UpdateAction::NpmGlobalLatest)
-        );
-        assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Bun,
-                package_layout: None,
-            }),
-            Some(UpdateAction::BunGlobalLatest)
-        );
-        assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Pnpm,
-                package_layout: None,
-            }),
-            Some(UpdateAction::PnpmGlobalLatest)
-        );
-        assert_eq!(
-            UpdateAction::from_install_context(&InstallContext {
-                method: InstallMethod::Brew,
-                package_layout: None,
-            }),
-            Some(UpdateAction::BrewUpgrade)
-        );
+        for method in [
+            InstallMethod::Other,
+            InstallMethod::Npm,
+            InstallMethod::Bun,
+            InstallMethod::VitePlus,
+            InstallMethod::Pnpm,
+            InstallMethod::Brew,
+        ] {
+            assert_eq!(
+                UpdateAction::from_install_context(&InstallContext {
+                    method,
+                    package_layout: None,
+                }),
+                UpdateAction::Disabled {
+                    release_url: RELEASE_URL,
+                }
+            );
+        }
         assert_eq!(
             UpdateAction::from_install_context(&InstallContext {
                 method: InstallMethod::Standalone {
@@ -137,7 +136,7 @@ mod tests {
                 },
                 package_layout: None,
             }),
-            Some(UpdateAction::StandaloneUnix)
+            UpdateAction::GitHubReleaseUnix
         );
         assert_eq!(
             UpdateAction::from_install_context(&InstallContext {
@@ -148,33 +147,7 @@ mod tests {
                 },
                 package_layout: None,
             }),
-            Some(UpdateAction::StandaloneWindows)
-        );
-    }
-
-    #[test]
-    fn standalone_update_commands_rerun_latest_installer() {
-        assert_eq!(
-            UpdateAction::StandaloneUnix.command_args(),
-            (
-                "sh",
-                &[
-                    "-c",
-                    "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
-                ][..],
-            )
-        );
-        assert_eq!(
-            UpdateAction::StandaloneWindows.command_args(),
-            (
-                "powershell",
-                &[
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-c",
-                    "$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex"
-                ][..],
-            )
+            UpdateAction::GitHubReleaseWindows
         );
     }
 }

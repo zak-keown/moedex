@@ -10,6 +10,7 @@ use std::io::Read;
 use std::num::NonZeroU32;
 use std::path::Path;
 
+use codex_app_server_daemon::daemon_state_dir;
 use codex_core::config::Config;
 use serde::Deserialize;
 
@@ -17,7 +18,6 @@ use super::CheckStatus;
 use super::DoctorCheck;
 
 const MAX_PROBE_ERROR_CHARS: usize = 120;
-const STATE_DIR_NAME: &str = "app-server-daemon";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const PID_FILE_NAME: &str = "app-server.pid";
 const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
@@ -42,7 +42,7 @@ struct ConfiguredUpdater {
 /// client connection problems without proving the daemon itself is broken.
 pub(super) async fn background_server_check(config: &Config) -> DoctorCheck {
     let mut details = Vec::new();
-    let state_dir = config.codex_home.join(STATE_DIR_NAME);
+    let state_dir = daemon_state_dir(&config.codex_home);
     details.push(format!("daemon state dir: {}", state_dir.display()));
     push_file_detail(
         &mut details,
@@ -87,7 +87,7 @@ pub(super) async fn background_server_check(config: &Config) -> DoctorCheck {
     )
     .details(details);
     if status.check_status() == CheckStatus::Warning {
-        check = check.remediation("Run codex app-server daemon version for more details.");
+        check = check.remediation("Run moedex app-server daemon version for more details.");
     }
     check
 }
@@ -305,24 +305,32 @@ mod tests {
     #[tokio::test]
     async fn configured_updates_and_missing_updater_record_are_visible() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let state_dir = temp.path().join(STATE_DIR_NAME);
+        let stock_state_dir = temp.path().join("app-server-daemon");
+        std::fs::create_dir(&stock_state_dir).expect("stock state dir");
+        std::fs::write(
+            stock_state_dir.join(SETTINGS_FILE_NAME),
+            r#"{"updater":{"autoUpdateEnabled":true,"updateIntervalMinutes":5}}"#,
+        )
+        .expect("stock settings");
+        let state_dir = daemon_state_dir(temp.path());
         std::fs::create_dir(&state_dir).expect("state dir");
         std::fs::write(
             state_dir.join(SETTINGS_FILE_NAME),
             r#"{"updater":{"autoUpdateEnabled":false,"updateIntervalMinutes":90}}"#,
         )
         .expect("settings");
+        std::fs::write(state_dir.join(PID_FILE_NAME), "{}").expect("pid record");
         let config = test_config(temp.path().to_path_buf()).await;
 
         let check = background_server_check(&config).await;
+        assert!(
+            check
+                .details
+                .contains(&"automatic updates: disabled (configured)".to_string())
+        );
         let details = check
             .details
             .iter()
-            .filter(|detail| {
-                detail.starts_with("automatic updates:")
-                    || detail.starts_with("update interval:")
-                    || detail.starts_with("update-loop pid file:")
-            })
             .map(|detail| {
                 detail
                     .replace(&temp.path().display().to_string(), "CODEX_HOME")
@@ -331,6 +339,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         insta::assert_snapshot!("configured_updater", details);
+
+        std::fs::remove_file(state_dir.join(SETTINGS_FILE_NAME)).expect("remove Moedex settings");
+        let check = background_server_check(&config).await;
+        assert!(check.details.contains(&"mode: ephemeral".to_string()));
     }
 
     #[test]

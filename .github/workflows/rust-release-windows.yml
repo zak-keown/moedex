@@ -2,14 +2,20 @@ name: rust-release-windows
 
 on:
   workflow_call:
+    inputs:
+      publish:
+        description: Enable fork-owned signing and release package assembly.
+        required: false
+        default: false
+        type: boolean
 
 env:
-  WINDOWS_BINARIES: "codex codex-code-mode-host codex-responses-api-proxy codex-windows-sandbox-setup codex-command-runner codex-app-server"
+  WINDOWS_BINARIES: "moedex codex-code-mode-host codex-responses-api-proxy codex-windows-sandbox-setup codex-command-runner codex-app-server"
 
 jobs:
   build-windows-binaries:
     name: Build Windows binaries - ${{ matrix.runner }} - ${{ matrix.target }} - ${{ matrix.bundle }}
-    runs-on: ${{ matrix.runs_on }}
+    runs-on: ${{ matrix.runner }}
     # Windows release builds can exceed an hour, so keep the timeout aligned
     # with the top-level release build headroom.
     timeout-minutes: 90
@@ -22,53 +28,39 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-x64
+          - runner: windows-2025
             target: x86_64-pc-windows-msvc
             bundle: primary
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy"
-            runs_on:
-              group: ${{ github.event.repository.name }}-runners
-              labels: ${{ github.event.repository.name }}-windows-x64
-          - runner: windows-arm64
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy"
+          - runner: windows-11-arm
             target: aarch64-pc-windows-msvc
             bundle: primary
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy"
-            runs_on:
-              group: ${{ github.event.repository.name }}-runners
-              labels: ${{ github.event.repository.name }}-windows-arm64
-          - runner: windows-x64
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy"
+          - runner: windows-2025
             target: x86_64-pc-windows-msvc
             bundle: helpers
             binaries: "codex-windows-sandbox-setup codex-command-runner"
-            runs_on:
-              group: ${{ github.event.repository.name }}-runners
-              labels: ${{ github.event.repository.name }}-windows-x64
-          - runner: windows-arm64
+          - runner: windows-11-arm
             target: aarch64-pc-windows-msvc
             bundle: helpers
             binaries: "codex-windows-sandbox-setup codex-command-runner"
-            runs_on:
-              group: ${{ github.event.repository.name }}-runners
-              labels: ${{ github.event.repository.name }}-windows-arm64
-          - runner: windows-x64
+          - runner: windows-2025
             target: x86_64-pc-windows-msvc
             bundle: app-server
             binaries: "codex-app-server codex-code-mode-host"
-            runs_on:
-              group: ${{ github.event.repository.name }}-runners
-              labels: ${{ github.event.repository.name }}-windows-x64
-          - runner: windows-arm64
+          - runner: windows-11-arm
             target: aarch64-pc-windows-msvc
             bundle: app-server
             binaries: "codex-app-server codex-code-mode-host"
-            runs_on:
-              group: ${{ github.event.repository.name }}-runners
-              labels: ${{ github.event.repository.name }}-windows-arm64
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Export release provenance
+        shell: bash
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/export-release-provenance.sh"
       - uses: ./.github/actions/setup-ci
       - name: Print runner specs (Windows)
         shell: powershell
@@ -190,11 +182,77 @@ jobs:
           path: codex-rs/symbols-dist/${{ matrix.target }}/*
           if-no-files-found: error
 
+  package-unsigned-windows:
+    needs:
+      - build-windows-binaries
+    if: ${{ !inputs.publish }}
+    name: Package unsigned Windows artifacts - ${{ matrix.target }}
+    runs-on: windows-2025
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-pc-windows-msvc
+          - aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-ci
+      - name: Export release provenance
+        shell: bash
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/export-release-provenance.sh"
+      - name: Download prebuilt Windows binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: windows-binaries-${{ matrix.target }}-*
+          merge-multiple: true
+          path: ${{ env.CARGO_TARGET_DIR }}/${{ matrix.target }}/release
+      - name: Stage and validate package archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          release_dir="$CARGO_TARGET_DIR/$target/release"
+          dest="dist/$target"
+          mkdir -p "$dest"
+          for binary in ${WINDOWS_BINARIES}; do
+            test -f "$release_dir/${binary}.exe"
+            cp "$release_dir/${binary}.exe" "$dest/${binary}-${target}.exe"
+          done
+          for bundle in primary app-server; do
+            bash "${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh" \
+              --target "$target" \
+              --bundle "$bundle" \
+              --entrypoint-dir "$release_dir" \
+              --archive-dir "$dest"
+          done
+          for file in "$dest"/*.exe; do
+            base="$(basename "$file")"
+            tar -C "$dest" -czf "${file}.tar.gz" "$base"
+            (cd "$dest" && 7z a "${base}.zip" "$base")
+            "${GITHUB_WORKSPACE}/.github/workflows/zstd" -T0 -19 "$file"
+          done
+      - name: Upload unsigned packaged Windows artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ${{ matrix.target }}
+          path: codex-rs/dist/${{ matrix.target }}/*
+          if-no-files-found: error
+
   build-windows:
     needs:
       - build-windows-binaries
+    if: ${{ inputs.publish }}
     name: Build - ${{ matrix.runner }} - ${{ matrix.target }}
-    runs-on: ${{ matrix.runs_on }}
+    runs-on: ${{ matrix.runner }}
     environment:
       name: azure-artifact-signing
       deployment: false
@@ -209,21 +267,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-x64
+          - runner: windows-2025
             target: x86_64-pc-windows-msvc
-            runs_on:
-              group: ${{ github.event.repository.name }}-runners
-              labels: ${{ github.event.repository.name }}-windows-x64
-          - runner: windows-x64
+          - runner: windows-2025
             target: aarch64-pc-windows-msvc
-            runs_on:
-              group: ${{ github.event.repository.name }}-runners
-              labels: ${{ github.event.repository.name }}-windows-x64
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Export release provenance
+        shell: bash
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/export-release-provenance.sh"
 
       - uses: ./.github/actions/setup-ci
 
@@ -377,9 +434,9 @@ jobs:
             # Create zip archive for Windows binaries.
             # Must run from inside the dest dir so 7z does not embed the
             # directory path inside the zip.
-            if [[ "$base" == "codex-${target}.exe" ]]; then
+            if [[ "$base" == "moedex-${target}.exe" ]]; then
               # Bundle the sandbox helper binaries into the main codex zip so
-              # WinGet installs include the required helpers next to codex.exe.
+              # Windows installs include the required helpers next to moedex.exe.
               # Fall back to the single-binary zip if the helpers are missing
               # to avoid breaking releases.
               bundle_dir="$(mktemp -d)"

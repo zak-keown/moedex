@@ -82,7 +82,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::Registry;
 use tracing_subscriber::util::SubscriberInitExt;
 
-const SQLITE_RECOVERY_CONFIG_WARNING_SUMMARY: &str = "Codex rebuilt its local database.";
+const SQLITE_RECOVERY_CONFIG_WARNING_SUMMARY: &str = "Moedex rebuilt its local database.";
 
 fn is_unsupported_untrusted_approval_policy_error(err: &std::io::Error) -> bool {
     err.get_ref().is_some_and(

@@ -43,9 +43,10 @@ pub(crate) use manual_update::request as request_manual_update;
 const INITIAL_UPDATE_DELAY: Duration = Duration::from_secs(5 * 60);
 const RESTART_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 #[cfg(unix)]
-const INSTALL_URL: &str = "https://chatgpt.com/codex/install.sh";
+const INSTALL_URL: &str = "https://github.com/zak-keown/moedex/releases/latest/download/install.sh";
 #[cfg(windows)]
-const INSTALL_URL: &str = "https://chatgpt.com/codex/install.ps1";
+const INSTALL_URL: &str =
+    "https://github.com/zak-keown/moedex/releases/latest/download/install.ps1";
 
 pub(crate) async fn run(http_client_factory: HttpClientFactory) -> Result<()> {
     let http = RouteAwareClientPool::new_without_request_logging(
@@ -284,8 +285,8 @@ async fn update_once(
     };
     anyhow::ensure!(
         script
-            .windows(b"CODEX_INSTALL_IF_LATEST".len())
-            .any(|window| window == b"CODEX_INSTALL_IF_LATEST"),
+            .windows(b"MOEDEX_INSTALL_IF_LATEST".len())
+            .any(|window| window == b"MOEDEX_INSTALL_IF_LATEST"),
         "standalone installer does not support guarded updates"
     );
     if trigger == UpdateTrigger::Scheduled
@@ -400,8 +401,8 @@ fn selected_release(daemon: &Daemon) -> Result<(&Path, std::path::PathBuf, Strin
         .settings_file
         .parent()
         .and_then(Path::parent)
-        .context("daemon settings path has no Codex home")?;
-    let release = std::fs::canonicalize(home.join("packages/standalone/current"))?;
+        .context("daemon settings path has no Moedex home")?;
+    let release = std::fs::canonicalize(home.join("packages/moedex/standalone/current"))?;
     let name = release
         .file_name()
         .context("managed release has no name")?
@@ -423,7 +424,7 @@ pub(crate) fn reexec_managed_updater(managed_codex_bin: &std::path::Path) -> Res
         .exec();
     Err(err).with_context(|| {
         format!(
-            "failed to replace updater with managed Codex binary {}",
+            "failed to replace updater with managed Moedex binary {}",
             managed_codex_bin.display()
         )
     })
@@ -451,20 +452,20 @@ async fn run_installer_script(
         command
     };
     let mut child = command
-        .env("CODEX_RELEASE", "latest")
-        .env("CODEX_NON_INTERACTIVE", "1")
-        .env("CODEX_INSTALL_IF_LATEST", "1")
-        .env("CODEX_UPDATE_FROM_RELEASE", previous_release)
+        .env("MOEDEX_RELEASE", "latest")
+        .env("MOEDEX_NON_INTERACTIVE", "1")
+        .env("MOEDEX_INSTALL_IF_LATEST", "1")
+        .env("MOEDEX_UPDATE_FROM_RELEASE", previous_release)
         .kill_on_drop(true)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .context("failed to invoke standalone Codex updater")?;
+        .context("failed to invoke standalone Moedex updater")?;
     let mut stdin = child
         .stdin
         .take()
-        .context("standalone Codex updater stdin was unavailable")?;
+        .context("standalone Moedex updater stdin was unavailable")?;
     #[cfg(unix)]
     let mut terminate = std::pin::pin!(terminate);
     #[cfg(unix)]
@@ -482,7 +483,7 @@ async fn run_installer_script(
     }
     write_result
         .context("installer write was cancelled")?
-        .context("failed to pass standalone Codex updater to shell")?;
+        .context("failed to pass standalone Moedex updater to shell")?;
     #[cfg(unix)]
     let status = tokio::select! {
         result = child.wait() => result,
@@ -493,12 +494,12 @@ async fn run_installer_script(
     };
     #[cfg(windows)]
     let status = child.wait().await;
-    let status = status.context("failed to wait for standalone Codex updater")?;
+    let status = status.context("failed to wait for standalone Moedex updater")?;
 
     if status.success() {
         Ok(UpdateLoopControl::Continue)
     } else {
-        anyhow::bail!("standalone Codex updater exited with status {status}")
+        anyhow::bail!("standalone Moedex updater exited with status {status}")
     }
 }
 
@@ -515,7 +516,7 @@ async fn cancel_installer(child: &mut tokio::process::Child, codex_home: &Path) 
     unsafe { libc::kill(-pid, libc::SIGKILL) };
     // A forced kill can bypass the shell trap on hosts using the mkdir lock.
     // The lock is ours only if its recorded owner is this still-unreaped shell.
-    let lock = codex_home.join("packages/standalone/install.lock.d");
+    let lock = codex_home.join("packages/moedex/standalone/install.lock.d");
     if std::fs::read_to_string(lock.join("pid")).is_ok_and(|owner| owner.trim() == pid.to_string())
     {
         let _ = std::fs::remove_dir_all(lock);
@@ -527,7 +528,7 @@ async fn fetch_installer_script(http: &impl InstallerHttp) -> Result<Vec<u8>> {
     match http.get(INSTALL_URL).await? {
         InstallerResponse::Success(body) => Ok(body),
         InstallerResponse::Unsuccessful { status } => {
-            anyhow::bail!("standalone Codex updater request failed with status {status}")
+            anyhow::bail!("standalone Moedex updater request failed with status {status}")
         }
     }
 }
@@ -554,7 +555,7 @@ impl InstallerHttp for RouteAwareClientPool {
         let response = RouteAwareClientPool::get(self, url)
             .send()
             .await
-            .context("failed to fetch standalone Codex updater")?;
+            .context("failed to fetch standalone Moedex updater")?;
         if !response.status().is_success() {
             return Ok(InstallerResponse::Unsuccessful {
                 status: response.status().as_u16(),
@@ -563,7 +564,7 @@ impl InstallerHttp for RouteAwareClientPool {
         let body = response
             .bytes()
             .await
-            .context("failed to read standalone Codex updater")?
+            .context("failed to read standalone Moedex updater")?
             .to_vec();
         Ok(InstallerResponse::Success(body))
     }
