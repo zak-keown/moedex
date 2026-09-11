@@ -642,10 +642,10 @@ impl AuthModeWidget {
             "".into(),
             "  Before you start:".into(),
             "".into(),
-            "  Decide how much autonomy you want to grant Codex".into(),
+            "  Decide how much autonomy you want to grant Moedex".into(),
             docs_line,
             "".into(),
-            "  Codex can make mistakes".into(),
+            "  Moedex can make mistakes".into(),
             HyperlinkLine::new(
                 "  Review the code it writes and commands it runs"
                     .dim()
@@ -684,7 +684,7 @@ impl AuthModeWidget {
         let lines = vec![
             "✓ API key configured".fg(Color::Green).into(),
             "".into(),
-            "  Codex will use usage-based billing with your API key.".into(),
+            "  Moedex will use usage-based billing with your API key.".into(),
         ];
 
         Paragraph::new(lines)

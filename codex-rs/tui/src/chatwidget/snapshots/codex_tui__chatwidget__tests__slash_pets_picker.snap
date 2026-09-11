@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/slash_commands.rs
+assertion_line: 3158
 expression: popup
 ---
   Select Pet
@@ -9,12 +10,12 @@ expression: popup
   Disable terminal pets
   BSOD                   A tiny blue-screen
                          gremlin
-› Codex                  The original Codex
-                         companion
-  Dewey                  A tidy duck for calm         Loading preview...
+  Dewey                  A tidy duck for calm
                          workspace days
-  Fireball               Hot path energy for
+  Fireball               Hot path energy for          Loading preview...
                          fast iteration
+› Moedex                 The original Moedex
+                         companion
   Null Signal            Quiet signal from the
                          void
   Rocky                  A steady rock when
