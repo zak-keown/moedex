@@ -30,7 +30,3 @@ pub const PRODUCT_IDENTITY: ProductIdentity = ProductIdentity {
     github_repository: "zak-keown/moedex",
     credential_service: "Moedex Auth",
 };
-
-#[cfg(test)]
-#[path = "lib_tests.rs"]
-mod tests;

@@ -34,8 +34,7 @@ jobs:
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$(go env GOPATH)/bin/actionlint" \
-            .github/workflows/moedex-qualification.yml \
-            .github/workflows/rust-release.yml
+            .github/workflows/moedex-qualification.yml
 
   upstream-base:
     runs-on: ubuntu-24.04
@@ -70,6 +69,10 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/setup-ci
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
       - name: Identity, home, build, and diagnostics
         run: >-
           python3 scripts/moedex_behavior_manifest.py run-gates

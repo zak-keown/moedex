@@ -5,11 +5,7 @@
   "gates": {
     "manifest": {
       "cwd": ".",
-      "argv": [
-        "python3",
-        "scripts/moedex_behavior_manifest.py",
-        "verify"
-      ]
+      "argv": ["python3", "scripts/moedex_behavior_manifest.py", "verify"]
     },
     "identity": {
       "cwd": "codex-rs",
@@ -23,21 +19,11 @@
     },
     "home": {
       "cwd": "codex-rs",
-      "argv": [
-        "just",
-        "test",
-        "-p",
-        "codex-utils-home-dir"
-      ]
+      "argv": ["just", "test", "-p", "codex-utils-home-dir"]
     },
     "build-info": {
       "cwd": "codex-rs",
-      "argv": [
-        "just",
-        "test",
-        "-p",
-        "codex-build-info"
-      ]
+      "argv": ["just", "test", "-p", "codex-build-info"]
     },
     "login": {
       "cwd": "codex-rs",
@@ -52,39 +38,19 @@
     },
     "secrets": {
       "cwd": "codex-rs",
-      "argv": [
-        "just",
-        "test",
-        "-p",
-        "codex-secrets"
-      ]
+      "argv": ["just", "test", "-p", "codex-secrets"]
     },
     "app-server-daemon": {
       "cwd": "codex-rs",
-      "argv": [
-        "just",
-        "test",
-        "-p",
-        "codex-app-server-daemon"
-      ]
+      "argv": ["just", "test", "-p", "codex-app-server-daemon"]
     },
     "app-server-transport": {
       "cwd": "codex-rs",
-      "argv": [
-        "just",
-        "test",
-        "-p",
-        "codex-app-server-transport"
-      ]
+      "argv": ["just", "test", "-p", "codex-app-server-transport"]
     },
     "app-server-protocol": {
       "cwd": "codex-rs",
-      "argv": [
-        "just",
-        "test",
-        "-p",
-        "codex-app-server-protocol"
-      ]
+      "argv": ["just", "test", "-p", "codex-app-server-protocol"]
     },
     "diagnostics": {
       "cwd": "codex-rs",
@@ -110,31 +76,15 @@
     },
     "rollout": {
       "cwd": "codex-rs",
-      "argv": [
-        "just",
-        "test",
-        "-p",
-        "codex-rollout"
-      ]
+      "argv": ["just", "test", "-p", "codex-rollout"]
     },
     "import": {
       "cwd": "codex-rs",
-      "argv": [
-        "just",
-        "test",
-        "-p",
-        "codex-external-agent-migration"
-      ]
+      "argv": ["just", "test", "-p", "codex-external-agent-migration"]
     },
     "cli": {
       "cwd": "codex-rs",
-      "argv": [
-        "just",
-        "test",
-        "-p",
-        "codex-cli",
-        "clap_command_is_moedex"
-      ]
+      "argv": ["just", "test", "-p", "codex-cli", "clap_command_is_moedex"]
     },
     "tui": {
       "cwd": "codex-rs",
@@ -173,21 +123,11 @@
     },
     "install-unix": {
       "cwd": ".",
-      "argv": [
-        "python3",
-        "-m",
-        "pytest",
-        "scripts/install/test_install_sh.py"
-      ]
+      "argv": ["python3", "-m", "pytest", "scripts/install/test_install_sh.py"]
     },
     "install-windows": {
       "cwd": ".",
-      "argv": [
-        "python3",
-        "-m",
-        "pytest",
-        "scripts/install/test_install_ps1.py"
-      ]
+      "argv": ["python3", "-m", "pytest", "scripts/install/test_install_ps1.py"]
     },
     "doctor-updates": {
       "cwd": "codex-rs",
@@ -231,16 +171,10 @@
       "requirement": "The public executable and generated command surfaces are named moedex.",
       "status": "intentional-change",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "cli",
-        "package-journeys"
-      ],
+      "tests": ["cli", "package-journeys"],
       "artifacts": [
         {
-          "paths": [
-            "cli/bin/moedex",
-            "cli/bin/moedex.exe"
-          ],
+          "paths": ["cli/bin/moedex", "cli/bin/moedex.exe"],
           "executable": true
         }
       ],
@@ -253,11 +187,7 @@
       "requirement": "User-visible application identity is Moedex with retained upstream attribution.",
       "status": "intentional-change",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "cli",
-        "tui",
-        "brand-inventory"
-      ],
+      "tests": ["cli", "tui", "brand-inventory"],
       "artifacts": [],
       "exclusions": [
         "OpenAI, ChatGPT, Codex Cloud, and model names remain provider or upstream labels."
@@ -268,10 +198,7 @@
       "requirement": "Home precedence is MOEDEX_HOME, CODEX_HOME compatibility, then ~/.moedex.",
       "status": "superseded",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "home",
-        "diagnostics"
-      ],
+      "tests": ["home", "diagnostics"],
       "artifacts": [],
       "exclusions": [
         "Repository-local .codex configuration retains its compatibility name."
@@ -282,11 +209,7 @@
       "requirement": "Same-host runtime state is isolated while remote hosts resolve their own home.",
       "status": "superseded",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "app-server-daemon",
-        "app-server-transport",
-        "exec-server"
-      ],
+      "tests": ["app-server-daemon", "app-server-transport", "exec-server"],
       "artifacts": [
         {
           "paths": [
@@ -305,9 +228,7 @@
       "requirement": "Codex import is explicit, preview-first, copy-only, and credentials default off.",
       "status": "intentional-change",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "import"
-      ],
+      "tests": ["import"],
       "artifacts": [],
       "exclusions": [
         "First-launch prompting is deferred; the explicit import command is the supported entrypoint."
@@ -318,10 +239,7 @@
       "requirement": "Settings and sessions import through typed and rollout-aware adapters.",
       "status": "superseded",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "import",
-        "rollout"
-      ],
+      "tests": ["import", "rollout"],
       "artifacts": [],
       "exclusions": [
         "Unsupported source items are reported and excluded rather than rewritten."
@@ -332,11 +250,7 @@
       "requirement": "Credentials use Moedex-owned storage and migrate only through storage adapters.",
       "status": "superseded",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "login",
-        "secrets",
-        "import"
-      ],
+      "tests": ["login", "secrets", "import"],
       "artifacts": [],
       "exclusions": [
         "Provider credential formats and sign-in names remain provider-owned."
@@ -363,22 +277,14 @@
       "requirement": "Release archives are complete, checksummed, provenance-bound, and qualified on six targets.",
       "status": "intentional-change",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "package-unit",
-        "package-journeys",
-        "behavior-artifacts"
-      ],
+      "tests": ["package-unit", "package-journeys", "behavior-artifacts"],
       "artifacts": [
         {
-          "paths": [
-            "cli/codex-package.json"
-          ],
+          "paths": ["cli/codex-package.json"],
           "executable": false
         },
         {
-          "paths": [
-            "app-server/codex-package.json"
-          ],
+          "paths": ["app-server/codex-package.json"],
           "executable": false
         }
       ],
@@ -391,11 +297,7 @@
       "requirement": "Version output leads with Moedex and retains fork and upstream provenance.",
       "status": "preserved",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "identity",
-        "build-info",
-        "diagnostics"
-      ],
+      "tests": ["identity", "build-info", "diagnostics"],
       "artifacts": [],
       "exclusions": [
         "Protocol compatibility versions retain their established Codex field names."
@@ -430,9 +332,7 @@
       "requirement": "Model-visible identity says Moedex exactly once across fresh and resumed sessions.",
       "status": "intentional-change",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "model-identity"
-      ],
+      "tests": ["model-identity"],
       "artifacts": [],
       "exclusions": [
         "Historical rollout bytes and truthful provider names are preserved."
@@ -443,10 +343,7 @@
       "requirement": "Install and uninstall coexist with stock Codex and preserve both products data.",
       "status": "intentional-change",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "install-unix",
-        "install-windows"
-      ],
+      "tests": ["install-unix", "install-windows"],
       "artifacts": [],
       "exclusions": [
         "Data deletion is a separate manual action after effective-home confirmation."
@@ -457,11 +354,7 @@
       "requirement": "Fork-only identity and state changes preserve provider and protocol semantics.",
       "status": "preserved",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "app-server-protocol",
-        "secrets",
-        "rollout"
-      ],
+      "tests": ["app-server-protocol", "secrets", "rollout"],
       "artifacts": [],
       "exclusions": [
         "Fork branding does not rename provider or compatibility contracts."
@@ -472,9 +365,7 @@
       "requirement": "Qualification detects mapped behavior loss and upstream update-channel adoption.",
       "status": "preserved",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
-      "tests": [
-        "manifest"
-      ],
+      "tests": ["manifest"],
       "artifacts": [],
       "exclusions": [
         "Upstream attribution and compatibility references are allowed outside update/publication targets."
@@ -860,12 +751,7 @@
       ".github/workflows/*release*.yml"
     ],
     "policyScan": {
-      "roots": [
-        ".github",
-        "scripts",
-        "codex-cli",
-        "codex-rs"
-      ],
+      "roots": [".github", "scripts", "codex-cli", "codex-rs"],
       "extensions": [
         "",
         ".bzl",

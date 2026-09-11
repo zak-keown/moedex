@@ -6,11 +6,11 @@ Moedex is an independent fork of [OpenAI Codex](https://github.com/openai/codex)
 
 Release packages cover these six targets:
 
-| Operating system | Architectures |
-| --- | --- |
-| macOS | Apple silicon (`aarch64-apple-darwin`), Intel (`x86_64-apple-darwin`) |
-| Linux | ARM64 (`aarch64-unknown-linux-musl`), x86-64 (`x86_64-unknown-linux-musl`) |
-| Windows | ARM64 (`aarch64-pc-windows-msvc`), x86-64 (`x86_64-pc-windows-msvc`) |
+| Operating system | Architectures                                                              |
+| ---------------- | -------------------------------------------------------------------------- |
+| macOS            | Apple silicon (`aarch64-apple-darwin`), Intel (`x86_64-apple-darwin`)      |
+| Linux            | ARM64 (`aarch64-unknown-linux-musl`), x86-64 (`x86_64-unknown-linux-musl`) |
+| Windows          | ARM64 (`aarch64-pc-windows-msvc`), x86-64 (`x86_64-pc-windows-msvc`)       |
 
 Install a pinned GitHub release on macOS or Linux, replacing `0.1.0` with the version you intend to run:
 
@@ -85,11 +85,11 @@ Uninstall preserves Moedex settings, sessions, credentials, logs, and caches. It
 
 Moedex preserves the Apache-2.0 license, notices, and upstream attribution. Authentication and hosted inference remain services of the provider you select, including OpenAI and ChatGPT where configured. Model names, provider environment variables, app-server protocol fields, rollout records, and internal `codex-*` crate and helper names remain where they describe a provider, historical data, or compatibility contract.
 
-| Remaining term | Why it remains |
-| --- | --- |
-| `codex-*`, `CODEX_*`, and internal paths | Compatibility-facing implementation identifiers. |
-| OpenAI, ChatGPT, model names, and Codex Cloud | Provider, model, or upstream service labels. |
-| App-server protocol names and rollout history | Stable protocol and historical data. |
-| OpenAI Codex | Upstream attribution. |
+| Remaining term                                | Why it remains                                   |
+| --------------------------------------------- | ------------------------------------------------ |
+| `codex-*`, `CODEX_*`, and internal paths      | Compatibility-facing implementation identifiers. |
+| OpenAI, ChatGPT, model names, and Codex Cloud | Provider, model, or upstream service labels.     |
+| App-server protocol names and rollout history | Stable protocol and historical data.             |
+| OpenAI Codex                                  | Upstream attribution.                            |
 
 See the [Apache-2.0 License](LICENSE) and the versioned [`moedex-behavior-manifest.json`](moedex-behavior-manifest.json) qualification contract.
