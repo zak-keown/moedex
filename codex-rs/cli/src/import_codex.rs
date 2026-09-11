@@ -4,6 +4,7 @@ use clap::Subcommand;
 use codex_external_agent_migration::CodexImportSelection;
 use codex_external_agent_migration::ConflictPolicy;
 use codex_external_agent_migration::apply_codex_import;
+use codex_external_agent_migration::cancel_codex_import;
 use codex_external_agent_migration::preview_codex_import;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::path::PathBuf;
@@ -89,6 +90,7 @@ async fn run_codex_import(args: CodexImportArgs) -> anyhow::Result<()> {
     let preview = preview_codex_import(source, destination, selection.clone()).await?;
     println!("{}", serde_json::to_string_pretty(&preview)?);
     if args.dry_run {
+        cancel_codex_import(&preview.id)?;
         return Ok(());
     }
     let report = apply_codex_import(&preview.id, selection).await?;

@@ -4,15 +4,17 @@ use crate::model::ConflictPolicy;
 use crate::sessions::records_codex::codex_rollout_thread_id;
 use crate::sessions::records_codex::validate_codex_rollout;
 use crate::source::codex::discover_rollouts;
+use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path::write_atomically as replace_text_atomically;
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::fs;
-#[cfg(unix)]
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
@@ -28,6 +30,11 @@ const CONFIG_FILE: &str = "config.toml";
 const AUTH_FILE: &str = "auth.json";
 const IMPORT_LEDGER_FILE: &str = "moedex_codex_imports.json";
 const BACKUP_DIR: &str = "codex-import-backups";
+const MAX_PREVIEWS: usize = 8;
+const MAX_PREVIEW_ITEMS: usize = 1_000;
+const MAX_ITEM_BYTES: usize = 20 * 1024 * 1024;
+const MAX_PREVIEW_BYTES: usize = 256 * 1024 * 1024;
+const MAX_REGISTRY_BYTES: usize = 512 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,6 +70,25 @@ pub struct ImportReport {
     pub unsupported: usize,
     pub backups: Vec<PathBuf>,
     pub source_hashes: Vec<String>,
+    pub items: Vec<ImportItemOutcome>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportDisposition {
+    Imported,
+    SkippedConflict,
+    AlreadyPresent,
+    Unsupported,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ImportItemOutcome {
+    pub kind: ImportItemKind,
+    pub relative_path: PathBuf,
+    pub disposition: ImportDisposition,
+    pub source_sha256: Option<String>,
+    pub reason: Option<String>,
 }
 
 #[derive(Clone)]
@@ -70,6 +96,7 @@ struct PlannedItem {
     preview: ImportPreviewItem,
     source: Option<PathBuf>,
     payload: Option<Vec<u8>>,
+    thread_id: Option<ThreadId>,
 }
 
 #[derive(Clone)]
@@ -78,6 +105,20 @@ struct ImportPlan {
     destination: PathBuf,
     preview: ImportPreview,
     items: Vec<PlannedItem>,
+    stored_bytes: usize,
+}
+
+#[derive(Default)]
+struct PreviewRegistry {
+    plans: HashMap<String, ImportPlan>,
+    order: VecDeque<String>,
+    stored_bytes: usize,
+}
+
+struct FileSnapshot {
+    path: PathBuf,
+    bytes: Vec<u8>,
+    sha256: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -91,7 +132,7 @@ struct ImportLedger {
     records: Vec<ImportLedgerRecord>,
 }
 
-static PREVIEWS: OnceLock<Mutex<HashMap<String, ImportPlan>>> = OnceLock::new();
+static PREVIEWS: OnceLock<Mutex<PreviewRegistry>> = OnceLock::new();
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub async fn preview_codex_import(
@@ -113,34 +154,36 @@ pub async fn preview_codex_import(
     if selection.settings {
         let config = source.join(CONFIG_FILE);
         if config.is_file() {
-            let raw = fs::read_to_string(&config)?;
-            let (payload, review_reasons) = sanitized_codex_config(&raw)?;
-            items.push(planned_file(
+            let snapshot = read_stable_snapshot(&config)?;
+            let raw = std::str::from_utf8(&snapshot.bytes).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "Codex config is not UTF-8")
+            })?;
+            let (payload, review_reasons) = sanitized_codex_config(raw)?;
+            items.push(planned_snapshot(
                 ImportItemKind::Settings,
                 PathBuf::from(CONFIG_FILE),
-                config,
+                snapshot,
                 payload,
                 &destination,
                 review_reasons,
+                None,
             )?);
         }
     }
     if selection.sessions {
-        let destination_thread_ids = discover_rollouts(&destination)?
-            .into_iter()
-            .filter_map(|path| codex_rollout_thread_id(&path).ok())
-            .collect::<HashSet<_>>();
+        let destination_thread_ids = destination_thread_ids(&destination)?;
         for rollout in discover_rollouts(&source)? {
             let relative_path = rollout
                 .strip_prefix(&source)
                 .map_err(io::Error::other)?
                 .to_path_buf();
-            if let Err(error) = validate_codex_rollout(&rollout) {
+            let snapshot = read_stable_snapshot(&rollout)?;
+            if let Err(error) = validate_codex_rollout(&snapshot.bytes) {
                 items.push(PlannedItem {
                     preview: ImportPreviewItem {
                         kind: ImportItemKind::Session,
                         relative_path,
-                        source_sha256: Some(sha256_file(&rollout)?),
+                        source_sha256: Some(snapshot.sha256),
                         conflict: false,
                         requires_review: true,
                         review_reasons: vec![format!(
@@ -149,18 +192,17 @@ pub async fn preview_codex_import(
                     },
                     source: None,
                     payload: None,
+                    thread_id: None,
                 });
                 continue;
             }
-            let thread_id = codex_rollout_thread_id(&rollout)?;
-            if destination_thread_ids.contains(&thread_id)
-                && !destination.join(&relative_path).exists()
-            {
+            let thread_id = codex_rollout_thread_id(&snapshot.bytes)?;
+            if destination_thread_ids.contains(&thread_id) {
                 items.push(PlannedItem {
                     preview: ImportPreviewItem {
                         kind: ImportItemKind::Session,
                         relative_path,
-                        source_sha256: Some(sha256_file(&rollout)?),
+                        source_sha256: Some(snapshot.sha256),
                         conflict: true,
                         requires_review: true,
                         review_reasons: vec![
@@ -170,17 +212,19 @@ pub async fn preview_codex_import(
                     },
                     source: None,
                     payload: None,
+                    thread_id: Some(thread_id),
                 });
                 continue;
             }
-            let payload = fs::read(&rollout)?;
-            items.push(planned_file(
+            let payload = snapshot.bytes.clone();
+            items.push(planned_snapshot(
                 ImportItemKind::Session,
                 relative_path,
-                rollout,
+                snapshot,
                 payload,
                 &destination,
                 Vec::new(),
+                Some(thread_id),
             )?);
         }
     }
@@ -198,8 +242,15 @@ pub async fn preview_codex_import(
             },
             source: None,
             payload: None,
+            thread_id: None,
         });
     }
+
+    let stored_bytes = items
+        .iter()
+        .map(|item| item.payload.as_ref().map_or(0, Vec::len))
+        .sum::<usize>();
+    validate_preview_bounds(items.len(), stored_bytes)?;
 
     let id = preview_id(&source, &destination, &selection, &items);
     let preview = ImportPreview {
@@ -217,9 +268,26 @@ pub async fn preview_codex_import(
                 destination,
                 preview: preview.clone(),
                 items,
+                stored_bytes,
             },
         );
     Ok(preview)
+}
+
+fn validate_preview_bounds(item_count: usize, stored_bytes: usize) -> io::Result<()> {
+    if item_count > MAX_PREVIEW_ITEMS {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Codex import preview exceeds the {MAX_PREVIEW_ITEMS}-item limit"),
+        ));
+    }
+    if stored_bytes > MAX_PREVIEW_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Codex import preview exceeds the {MAX_PREVIEW_BYTES}-byte limit"),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn apply_codex_import(
@@ -229,6 +297,7 @@ pub async fn apply_codex_import(
     let plan = previews()
         .lock()
         .map_err(|_| io::Error::other("Codex import preview registry is unavailable"))?
+        .plans
         .get(preview_id)
         .cloned()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Codex import preview expired"))?;
@@ -251,6 +320,11 @@ pub async fn apply_codex_import(
     for item in plan.items {
         let Some(payload) = item.payload else {
             report.unsupported = report.unsupported.saturating_add(1);
+            report.items.push(item_outcome(
+                &item.preview,
+                ImportDisposition::Unsupported,
+                item.preview.review_reasons.first().cloned(),
+            ));
             continue;
         };
         let Some(source_path) = item.source else {
@@ -270,13 +344,41 @@ pub async fn apply_codex_import(
         report.source_hashes.push(expected_hash.to_string());
         let target = destination.join(&item.preview.relative_path);
         ensure_target_beneath_home(&destination, &target)?;
+        if let Some(thread_id) = item.thread_id {
+            let destination_thread_ids = destination_thread_ids(&destination)?;
+            if destination_thread_ids.contains(&thread_id) {
+                report.skipped = report.skipped.saturating_add(1);
+                report.items.push(item_outcome(
+                    &item.preview,
+                    ImportDisposition::SkippedConflict,
+                    Some(
+                        "destination already contains this thread ID; retained destination session"
+                            .to_string(),
+                    ),
+                ));
+                continue;
+            }
+        }
         if target.is_file() && sha256_file(&target)? == sha256_bytes(&payload) {
             report.already_present = report.already_present.saturating_add(1);
             record_import(&destination, &mut ledger, &item.preview, expected_hash)?;
+            report.items.push(item_outcome(
+                &item.preview,
+                ImportDisposition::AlreadyPresent,
+                None,
+            ));
             continue;
         }
-        if target.exists() && selection.conflict_policy == ConflictPolicy::Skip {
+        if target.exists()
+            && (item.preview.kind == ImportItemKind::Session
+                || selection.conflict_policy == ConflictPolicy::Skip)
+        {
             report.skipped = report.skipped.saturating_add(1);
+            report.items.push(item_outcome(
+                &item.preview,
+                ImportDisposition::SkippedConflict,
+                Some("destination path already exists; retained destination item".to_string()),
+            ));
             continue;
         }
         if let Some(parent) = target.parent() {
@@ -309,30 +411,50 @@ pub async fn apply_codex_import(
         }
         record_import(&destination, &mut ledger, &item.preview, expected_hash)?;
         report.imported = report.imported.saturating_add(1);
+        report.items.push(item_outcome(
+            &item.preview,
+            ImportDisposition::Imported,
+            None,
+        ));
     }
+    cancel_codex_import(preview_id)?;
     Ok(report)
 }
 
-fn planned_file(
+pub fn cancel_codex_import(preview_id: &str) -> io::Result<bool> {
+    previews()
+        .lock()
+        .map_err(|_| io::Error::other("Codex import preview registry is unavailable"))
+        .map(|mut previews| previews.remove(preview_id).is_some())
+}
+
+fn planned_snapshot(
     kind: ImportItemKind,
     relative_path: PathBuf,
-    source: PathBuf,
+    snapshot: FileSnapshot,
     payload: Vec<u8>,
     destination: &Path,
     review_reasons: Vec<String>,
+    thread_id: Option<ThreadId>,
 ) -> io::Result<PlannedItem> {
-    let source_sha256 = sha256_file(&source)?;
+    if snapshot.bytes.len() > MAX_ITEM_BYTES || payload.len() > MAX_ITEM_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Codex import item exceeds the {MAX_ITEM_BYTES}-byte limit"),
+        ));
+    }
     Ok(PlannedItem {
         preview: ImportPreviewItem {
             kind,
             conflict: destination.join(&relative_path).exists(),
             relative_path,
-            source_sha256: Some(source_sha256),
+            source_sha256: Some(snapshot.sha256),
             requires_review: !review_reasons.is_empty(),
             review_reasons,
         },
-        source: Some(source),
+        source: Some(snapshot.path),
         payload: Some(payload),
+        thread_id,
     })
 }
 
@@ -385,8 +507,95 @@ fn ensure_target_beneath_home(home: &Path, target: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn previews() -> &'static Mutex<HashMap<String, ImportPlan>> {
-    PREVIEWS.get_or_init(|| Mutex::new(HashMap::new()))
+fn previews() -> &'static Mutex<PreviewRegistry> {
+    PREVIEWS.get_or_init(|| Mutex::new(PreviewRegistry::default()))
+}
+
+impl PreviewRegistry {
+    fn insert(&mut self, id: String, plan: ImportPlan) {
+        self.remove(&id);
+        while self.plans.len() >= MAX_PREVIEWS
+            || self.stored_bytes.saturating_add(plan.stored_bytes) > MAX_REGISTRY_BYTES
+        {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(evicted) = self.plans.remove(&oldest) {
+                self.stored_bytes = self.stored_bytes.saturating_sub(evicted.stored_bytes);
+            }
+        }
+        self.stored_bytes = self.stored_bytes.saturating_add(plan.stored_bytes);
+        self.order.push_back(id.clone());
+        self.plans.insert(id, plan);
+    }
+
+    fn remove(&mut self, id: &str) -> Option<ImportPlan> {
+        let removed = self.plans.remove(id)?;
+        self.stored_bytes = self.stored_bytes.saturating_sub(removed.stored_bytes);
+        self.order.retain(|candidate| candidate != id);
+        Some(removed)
+    }
+}
+
+fn item_outcome(
+    item: &ImportPreviewItem,
+    disposition: ImportDisposition,
+    reason: Option<String>,
+) -> ImportItemOutcome {
+    ImportItemOutcome {
+        kind: item.kind,
+        relative_path: item.relative_path.clone(),
+        disposition,
+        source_sha256: item.source_sha256.clone(),
+        reason,
+    }
+}
+
+fn destination_thread_ids(destination: &Path) -> io::Result<HashSet<ThreadId>> {
+    let thread_ids = discover_rollouts(destination)?
+        .into_iter()
+        .filter_map(|path| read_stable_snapshot(&path).ok())
+        .filter_map(|snapshot| codex_rollout_thread_id(&snapshot.bytes).ok())
+        .collect::<HashSet<_>>();
+    Ok(thread_ids)
+}
+
+fn read_stable_snapshot(path: &Path) -> io::Result<FileSnapshot> {
+    read_stable_snapshot_with_after_read(path, || {})
+}
+
+fn read_stable_snapshot_with_after_read(
+    path: &Path,
+    after_read: impl FnOnce(),
+) -> io::Result<FileSnapshot> {
+    use std::io::Read;
+
+    let mut file = File::open(path)?;
+    let before = file.metadata()?;
+    if before.len() > MAX_ITEM_BYTES as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Codex import item exceeds the {MAX_ITEM_BYTES}-byte limit"),
+        ));
+    }
+    let mut bytes = Vec::with_capacity(before.len() as usize);
+    file.read_to_end(&mut bytes)?;
+    after_read();
+    let after = file.metadata()?;
+    if before.len() != after.len()
+        || before.modified().ok() != after.modified().ok()
+        || bytes.len() as u64 != before.len()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("source changed while previewing: {}", path.display()),
+        ));
+    }
+    Ok(FileSnapshot {
+        path: path.to_path_buf(),
+        sha256: sha256_bytes(&bytes),
+        bytes,
+    })
 }
 
 fn available_backup_path(preferred: &Path) -> PathBuf {
@@ -452,8 +661,8 @@ fn record_import(
             source_sha256: source_sha256.to_string(),
         });
     }
-    let payload = serde_json::to_vec_pretty(ledger).map_err(io::Error::other)?;
-    write_atomic(&destination.join(IMPORT_LEDGER_FILE), &payload, "ledger")
+    let payload = serde_json::to_string_pretty(ledger).map_err(io::Error::other)?;
+    replace_text_atomically(&destination.join(IMPORT_LEDGER_FILE), &payload)
 }
 
 fn write_atomic(path: &Path, payload: &[u8], suffix: &str) -> io::Result<()> {

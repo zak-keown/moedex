@@ -1,20 +1,14 @@
 use codex_protocol::ThreadId;
 use codex_rollout::RolloutItem;
-use std::fs::File;
 use std::io;
-use std::io::BufRead;
-use std::io::BufReader;
-use std::path::Path;
 
-pub(crate) fn validate_codex_rollout(path: &Path) -> io::Result<()> {
-    let reader = BufReader::new(File::open(path)?);
+pub(crate) fn validate_codex_rollout(bytes: &[u8]) -> io::Result<()> {
     let mut records = 0_usize;
-    for line in reader.lines() {
-        let line = line?;
-        if line.trim().is_empty() {
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        serde_json::from_str::<RolloutItem>(&line)
+        serde_json::from_slice::<RolloutItem>(line)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
         records = records.saturating_add(1);
     }
@@ -27,14 +21,12 @@ pub(crate) fn validate_codex_rollout(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-pub(crate) fn codex_rollout_thread_id(path: &Path) -> io::Result<ThreadId> {
-    let reader = BufReader::new(File::open(path)?);
-    for line in reader.lines() {
-        let line = line?;
-        if line.trim().is_empty() {
+pub(crate) fn codex_rollout_thread_id(bytes: &[u8]) -> io::Result<ThreadId> {
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        let item = serde_json::from_str::<RolloutItem>(&line)
+        let item = serde_json::from_slice::<RolloutItem>(line)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
         if let RolloutItem::SessionMeta(meta) = item {
             return Ok(meta.meta.id);

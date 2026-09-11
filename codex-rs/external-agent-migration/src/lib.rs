@@ -80,11 +80,14 @@ pub use service::record_import_error;
 pub(crate) use source::ClaSource;
 pub(crate) use source::CurSource;
 pub(crate) use source::InstructionSourceGroup;
+pub use source_codex::ImportDisposition;
 pub use source_codex::ImportItemKind;
+pub use source_codex::ImportItemOutcome;
 pub use source_codex::ImportPreview;
 pub use source_codex::ImportPreviewItem;
 pub use source_codex::ImportReport;
 pub use source_codex::apply_codex_import;
+pub use source_codex::cancel_codex_import;
 pub use source_codex::preview_codex_import;
 #[cfg(test)]
 use subagents::FrontmatterValue;

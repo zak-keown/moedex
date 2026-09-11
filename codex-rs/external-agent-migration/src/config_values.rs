@@ -11,10 +11,69 @@ pub(crate) fn sanitized_codex_config(raw: &str) -> io::Result<(Vec<u8>, Vec<Stri
     let mut value: TomlValue =
         toml::from_str(raw).map_err(|_| invalid_data_error("Codex config is not valid TOML"))?;
     let mut review_reasons = Vec::new();
+    redact_secret_bearing_config(&mut value, &mut review_reasons);
     sanitize_codex_value(&mut value, &mut Vec::new(), &mut review_reasons);
     let rendered =
         toml::to_string_pretty(&value).map_err(|err| invalid_data_error(err.to_string()))?;
     Ok((rendered.into_bytes(), review_reasons))
+}
+
+fn redact_secret_bearing_config(value: &mut TomlValue, review_reasons: &mut Vec<String>) {
+    let Some(root) = value.as_table_mut() else {
+        return;
+    };
+    for key in ["shell_environment_policy", "projects"] {
+        if root.remove(key).is_some() {
+            review_reasons.push(format!("{key}: omitted from credential-free import"));
+        }
+    }
+    if let Some(servers) = root
+        .get_mut("mcp_servers")
+        .and_then(TomlValue::as_table_mut)
+    {
+        for server in servers
+            .iter_mut()
+            .filter_map(|(_, value)| value.as_table_mut())
+        {
+            for key in [
+                "env",
+                "bearer_token_env_var",
+                "http_headers",
+                "env_http_headers",
+                "http_headers_helper",
+            ] {
+                if server.remove(key).is_some() {
+                    review_reasons.push(format!(
+                        "mcp_servers.*.{key}: omitted from credential-free import"
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(providers) = root
+        .get_mut("model_providers")
+        .and_then(TomlValue::as_table_mut)
+    {
+        for provider in providers
+            .iter_mut()
+            .filter_map(|(_, value)| value.as_table_mut())
+        {
+            for key in [
+                "experimental_bearer_token",
+                "query_params",
+                "http_headers",
+                "env_http_headers",
+                "auth",
+                "aws",
+            ] {
+                if provider.remove(key).is_some() {
+                    review_reasons.push(format!(
+                        "model_providers.*.{key}: omitted from credential-free import"
+                    ));
+                }
+            }
+        }
+    }
 }
 
 fn sanitize_codex_value(
