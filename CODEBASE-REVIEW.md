@@ -18,8 +18,8 @@ dispositions:
   fixed: 15
   stale: 0
   skipped: 1
-  deferred: 2
-  open: 242
+  deferred: 3
+  open: 241
 ---
 
 # Codebase Review — moedex
@@ -1518,6 +1518,10 @@ The existing test `unpackaged_pipe_clients_are_rejected_before_sending_a_request
 
 Fix: the `None if service_family.is_some() => {}` arm should be removed (or inverted to require `client_family.is_some()` unconditionally outside of the debug foreground escape hatch), so an unpackaged client is only ever accepted under the existing `#[cfg(debug_assertions)] FOREGROUND_MODE` escape hatch, never in a normal packaged deployment.
 
+**Disposition:** deferred
+**Commit:** —
+**Resolved:** 2026-09-11
+**Note:** Premise confirmed still present (not stale): package_identity.rs:85 'None if service_family.is_some() => {}' authorizes an unpackaged client (client_family == None) whenever the service itself is packaged — the normal production config — inverting the invariant asserted by the final arm's bail! (line 88). The inner service_family match was refactored since the review snapshot, but the buggy outer arm is verbatim. Environment-blocked: windows-sandbox-service is Windows-only and cannot be compiled/tested here, and this is a LocalSystem-privileged security gate, so an untested edit is unsafe to ship blind. Recommended fix (Windows follow-up, with a maintainer decision): remove/​invert the line-85 arm so an unpackaged client is accepted only under the existing #[cfg(debug_assertions)] FOREGROUND_MODE hatch; add a test for the packaged-service/unpackaged-client case.
 ### CR-042: Public Codex/AsyncCodex API has no way to supply a custom approval handler, and the default silently accepts every escalated command/file-change
 **File:** `sdk/python/src/openai_codex/client.py`
 **Anchor:** `_default_approval_handler`
