@@ -261,12 +261,16 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
             errors.append("sourceInventory policyScan must be an object")
         else:
             errors.extend(
-                _unknown_fields(policy, POLICY_SCAN_FIELDS, "sourceInventory policyScan")
+                _unknown_fields(
+                    policy, POLICY_SCAN_FIELDS, "sourceInventory policyScan"
+                )
             )
             for field in ("roots", "excludedFileGlobs"):
                 values = policy.get(field)
                 if not isinstance(values, list) or not values:
-                    errors.append(f"sourceInventory policyScan {field} must be nonempty")
+                    errors.append(
+                        f"sourceInventory policyScan {field} must be nonempty"
+                    )
                     continue
                 seen: set[str] = set()
                 for value in values:
@@ -335,12 +339,18 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
                         errors.append(f"{label} must be an object")
                         continue
                     errors.extend(_unknown_fields(item, POLICY_ALLOWED_FIELDS, label))
-                    _, path_errors = _safe_relative_path(item.get("path"), f"{label} path")
+                    _, path_errors = _safe_relative_path(
+                        item.get("path"), f"{label} path"
+                    )
                     errors.extend(path_errors)
                     if item.get("pattern") not in (policy_patterns or []):
                         errors.append(f"{label} pattern is not a policy regex")
                     count = item.get("count")
-                    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                    if (
+                        not isinstance(count, int)
+                        or isinstance(count, bool)
+                        or count < 0
+                    ):
                         errors.append(f"{label} count must be a nonnegative integer")
         covered_files: set[str] = set()
         expectations = inventory.get("expectations")
@@ -474,7 +484,10 @@ def verify_source_inventory(manifest: dict[str, Any], repo_root: Path) -> list[s
         except FileNotFoundError:
             errors.append(f"missing policy scan root: {relative_root}")
             continue
-        if resolved_repo != resolved_root and resolved_repo not in resolved_root.parents:
+        if (
+            resolved_repo != resolved_root
+            and resolved_repo not in resolved_root.parents
+        ):
             errors.append(f"policy scan root escapes repository: {relative_root}")
             continue
         for path in root.rglob("*"):
