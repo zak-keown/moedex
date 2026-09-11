@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 16
+  fixed: 17
   stale: 0
   skipped: 2
   deferred: 3
-  open: 239
+  open: 238
 ---
 
 # Codebase Review — moedex
@@ -661,6 +661,10 @@ marketplace root. The same fix as `loader.rs::clone_git_plugin_source` applies: 
 `git rev-parse HEAD` after checkout and, when `ref_name` is a full SHA, fail the add if it doesn't
 match.
 
+**Disposition:** fixed
+**Commit:** `ca415280c6`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-017: Marketplace auto-upgrade git checkout does not verify a SHA-pinned ref against what was actually checked out
 
 **File:** `codex-rs/core-plugins/src/marketplace_upgrade/git.rs`
