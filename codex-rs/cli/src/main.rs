@@ -475,7 +475,7 @@ type HostSandboxArgs = UnsupportedSandboxArgs;
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 #[derive(Debug, Parser)]
 struct UnsupportedSandboxArgs {
-    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer <name>.config.toml from the effective Moedex home on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 
@@ -3779,7 +3779,7 @@ mod tests {
 
     #[test]
     fn plugin_marketplace_help_uses_plugin_namespace() {
-        let help = help_from_args(&["codex", "plugin", "marketplace", "--help"]);
+        let help = help_from_args(&["moedex", "plugin", "marketplace", "--help"]);
         assert!(
             help.contains(&format!(
                 "Usage: {} plugin marketplace [OPTIONS] <COMMAND>",
@@ -3789,7 +3789,7 @@ mod tests {
         );
 
         for subcommand in ["add", "list", "upgrade", "remove"] {
-            let help = help_from_args(&["codex", "plugin", "marketplace", subcommand, "--help"]);
+            let help = help_from_args(&["moedex", "plugin", "marketplace", subcommand, "--help"]);
             assert!(
                 help.contains(&format!(
                     "Usage: {} plugin marketplace {subcommand}",
@@ -3797,6 +3797,44 @@ mod tests {
                 )),
                 "{help}"
             );
+        }
+    }
+
+    #[test]
+    fn mcp_and_plugin_help_use_public_moedex_commands() {
+        for args in [
+            &["moedex", "mcp", "add", "--help"][..],
+            &["moedex", "plugin", "add", "--help"][..],
+            &["moedex", "plugin", "list", "--help"][..],
+            &["moedex", "plugin", "remove", "--help"][..],
+        ] {
+            let help = help_from_args(args);
+            assert!(help.contains("moedex"), "{help}");
+            assert!(!help.contains("codex mcp"), "{help}");
+            assert!(!help.contains("codex plugin"), "{help}");
+        }
+    }
+
+    #[test]
+    fn bash_completion_has_no_stock_public_command_states() {
+        let mut command = MultitoolCli::command();
+        let mut output = Vec::new();
+        generate(Shell::Bash, &mut command, "moedex", &mut output);
+        let completion = String::from_utf8(output).expect("completion is UTF-8");
+
+        assert!(completion.contains("_moedex()"), "{completion}");
+        assert!(!completion.contains("\n_codex()"), "{completion}");
+        assert!(!completion.contains("codex__"), "{completion}");
+        assert!(!completion.contains("default codex"), "{completion}");
+        for public_command in [
+            "codex app-server",
+            "codex exec",
+            "codex login",
+            "codex mcp",
+            "codex plugin",
+            "codex resume",
+        ] {
+            assert!(!completion.contains(public_command), "{completion}");
         }
     }
 

@@ -99,6 +99,40 @@ class InstallShTest(unittest.TestCase):
             self.assertTrue(current.is_symlink())
             self.assertEqual(current.resolve(), release.resolve())
 
+    def test_moedex_home_alias_of_codex_home_never_removes_stock_current(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            stock_home = root / "stock-home"
+            release = stock_home / "packages" / "standalone" / "releases" / "stock"
+            release.mkdir(parents=True)
+            current = stock_home / "packages" / "standalone" / "current"
+            current.symlink_to(release)
+            owner_marker = (
+                stock_home / "packages" / "standalone" / "moedex-current-target"
+            )
+            owner_marker.write_text(f"{release.resolve()}\n", encoding="utf-8")
+            stock_data = stock_home / "auth.json"
+            stock_data.write_text("stock credentials\n", encoding="utf-8")
+            install_bin = root / "install-bin"
+            install_bin.mkdir()
+            (install_bin / "moedex").symlink_to(current / "bin" / "moedex")
+
+            result, requests = run_installer_in(
+                root,
+                VERSION,
+                force_macos=True,
+                moedex_home=stock_home,
+                codex_home=stock_home,
+                arguments=("--uninstall",),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(requests, [])
+            self.assertFalse((install_bin / "moedex").is_symlink())
+            self.assertTrue(current.is_symlink())
+            self.assertEqual(current.resolve(), release.resolve())
+            self.assertEqual(stock_data.read_text(), "stock credentials\n")
+
     def test_installer_uses_only_the_moedex_github_repository(self) -> None:
         script = INSTALL_SCRIPT.read_text()
         self.assertIn("github.com/zak-keown/moedex", script)

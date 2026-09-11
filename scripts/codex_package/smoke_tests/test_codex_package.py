@@ -19,6 +19,7 @@ Each package contains one entrypoint, not both codex and codex-app-server.
 """
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -71,14 +72,29 @@ def test_completion_invokes_public_moedex_command(package: SmokePackage) -> None
     output = package.run("completion", "bash").stdout
     assert "_moedex()" in output
     assert "complete -F _moedex -o bashdefault -o default moedex" in output
-    assert "complete -F _codex" not in output
-    assert "-o default codex" not in output
+    forbidden_public_patterns = (
+        r"(?m)^\s*codex(?:__[^)]*)?\)",
+        r"\b_codex\b",
+        r"(?m)^complete\b.*\bcodex$",
+        r"\bcodex (?:app-server|completion|exec|features|login|mcp|plugin|resume)\b",
+    )
+    for pattern in forbidden_public_patterns:
+        assert re.search(pattern, output, flags=re.IGNORECASE) is None, pattern
+
+    # `import codex` names the explicit stock-product import source. It is the
+    # only public completion state in which a lowercase `codex` token is valid.
+    public_codex_lines = [
+        line
+        for line in output.splitlines()
+        if re.search(r"\bcodex\b", line, flags=re.IGNORECASE)
+    ]
+    assert all("moedex__import__codex" in line for line in public_codex_lines)
 
 
 @pytest.mark.parametrize(
     ("arguments", "expected"),
     [
-        pytest.param(("--help",), "Usage: moedex", id="interactive-launch"),
+        pytest.param(("--help",), "Usage: moedex", id="root-help"),
         pytest.param(("exec", "--help"), "Usage: moedex exec", id="exec"),
         pytest.param(("resume", "--help"), "Usage: moedex resume", id="resume"),
         pytest.param(("login", "--help"), "Usage: moedex login", id="login"),
@@ -97,6 +113,31 @@ def test_packaged_headless_journey_entrypoints(
     """Every public journey starts headlessly without auth or a browser."""
     output = package.run(*arguments).stdout
     assert expected in output
+
+
+def test_packaged_interactive_launch_dispatches_tui_headlessly(
+    package: SmokePackage,
+) -> None:
+    """The package reaches TUI terminal admission without opening a browser."""
+    environment = dict(package.environment)
+    environment["TERM"] = "dumb"
+    for variable in ("TERM_PROGRAM", "TMUX", "TMUX_PANE", "ZELLIJ_SESSION_NAME"):
+        environment.pop(variable, None)
+
+    result = subprocess.run(
+        [str(package.cli)],
+        cwd=package.directory,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode != 0
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    assert "stdin is not a terminal" in output, output
 
 
 def test_packaged_exec_and_resume_complete_against_local_provider(

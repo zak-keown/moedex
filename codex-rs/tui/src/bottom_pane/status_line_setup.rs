@@ -75,7 +75,7 @@ pub(crate) enum StatusLineItem {
     )]
     ProjectRoot,
 
-    /// Hostname of the machine running Codex.
+    /// Hostname of the machine running Moedex.
     Hostname,
 
     /// Current git branch name (if in a repository).

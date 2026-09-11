@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param([string]$Release)
+param(
+    [string]$Release,
+    [switch]$Uninstall
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -816,6 +819,115 @@ function Test-VisibleCodexCommand {
     }
 }
 
+function Get-NormalizedInstallerPath {
+    param([string]$Path)
+
+    return [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
+}
+
+function Test-InstallerPathsEqual {
+    param(
+        [string]$Left,
+        [string]$Right
+    )
+
+    return (Get-NormalizedInstallerPath -Path $Left).Equals(
+        (Get-NormalizedInstallerPath -Path $Right),
+        [System.StringComparison]::OrdinalIgnoreCase
+    )
+}
+
+function Get-InstallerLinkTarget {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+    $item = Get-Item -LiteralPath $Path -Force
+    if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        return $null
+    }
+    return [string]$item.Target
+}
+
+function Remove-InstallerOwnedLink {
+    param(
+        [string]$Path,
+        [string[]]$ExpectedTargets
+    )
+
+    $target = Get-InstallerLinkTarget -Path $Path
+    if ([string]::IsNullOrWhiteSpace($target)) {
+        return
+    }
+    foreach ($expectedTarget in $ExpectedTargets) {
+        if (Test-InstallerPathsEqual -Left $target -Right $expectedTarget) {
+            Remove-Item -LiteralPath $Path -Force
+            return
+        }
+    }
+}
+
+function Test-MoedexHomeIsSharedWithCodex {
+    param(
+        [string]$MoedexHome,
+        [string]$UserProfile,
+        [string]$CodexHome
+    )
+
+    if (Test-InstallerPathsEqual -Left $MoedexHome -Right (Join-Path $UserProfile ".codex")) {
+        return $true
+    }
+    return -not [string]::IsNullOrWhiteSpace($CodexHome) -and
+        (Test-InstallerPathsEqual -Left $MoedexHome -Right $CodexHome)
+}
+
+function Uninstall-Moedex {
+    param(
+        [string]$MoedexHome,
+        [string]$VisibleBinDir,
+        [string]$UserProfile,
+        [string]$CodexHome
+    )
+
+    $standaloneRoot = Join-Path $MoedexHome "packages\standalone"
+    $releasesDir = Join-Path $standaloneRoot "releases"
+    $currentDir = Join-Path $standaloneRoot "current"
+    $ownerMarker = Join-Path $standaloneRoot "moedex-current-target"
+    Remove-InstallerOwnedLink -Path $VisibleBinDir -ExpectedTargets @(
+        (Join-Path $currentDir "bin"),
+        $currentDir
+    )
+
+    if (Test-MoedexHomeIsSharedWithCodex -MoedexHome $MoedexHome -UserProfile $UserProfile -CodexHome $CodexHome) {
+        Write-WarningStep "Leaving package links in CODEX_HOME unchanged because that home may be shared with Codex."
+    } else {
+        $currentTarget = Get-InstallerLinkTarget -Path $currentDir
+        $recordedTarget = if (Test-Path -LiteralPath $ownerMarker) {
+            [System.IO.File]::ReadAllText($ownerMarker).Trim()
+        } else {
+            $null
+        }
+        if (-not [string]::IsNullOrWhiteSpace($currentTarget) -and
+            -not [string]::IsNullOrWhiteSpace($recordedTarget) -and
+            (Test-InstallerPathsEqual -Left $currentTarget -Right $recordedTarget) -and
+            (Get-NormalizedInstallerPath -Path $currentTarget).StartsWith(
+                (Get-NormalizedInstallerPath -Path $releasesDir) + [System.IO.Path]::DirectorySeparatorChar,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )) {
+            Remove-Item -LiteralPath $currentDir -Force
+            Remove-Item -LiteralPath $ownerMarker -Force
+        }
+    }
+
+    Write-Step "Removed installer-managed Moedex command links."
+    Write-Step "Moedex data and downloaded releases were preserved in $MoedexHome."
+}
+
+if ($MyInvocation.InvocationName -eq ".") {
+    return
+}
+
 if ($env:OS -ne "Windows_NT") {
     Write-Error "install.ps1 supports Windows only. Use install.sh on macOS or Linux."
     exit 1
@@ -859,6 +971,7 @@ $releasesDir = Join-Path $standaloneRoot "releases"
 $currentDir = Join-Path $standaloneRoot "current"
 $autoUpdateVersion = Join-Path $standaloneRoot "auto-update-version"
 $lockPath = Join-Path $standaloneRoot "install.lock"
+$currentOwnerMarker = Join-Path $standaloneRoot "moedex-current-target"
 
 $defaultVisibleBinDir = Join-Path $env:LOCALAPPDATA "Programs\Moedex\bin"
 if (-not [string]::IsNullOrWhiteSpace($env:MOEDEX_INSTALL_DIR)) {
@@ -867,6 +980,11 @@ if (-not [string]::IsNullOrWhiteSpace($env:MOEDEX_INSTALL_DIR)) {
     $visibleBinDir = $defaultVisibleBinDir
 } else {
     $visibleBinDir = $env:CODEX_INSTALL_DIR
+}
+
+if ($Uninstall) {
+    Uninstall-Moedex -MoedexHome $codexHome -VisibleBinDir $visibleBinDir -UserProfile $env:USERPROFILE -CodexHome $env:CODEX_HOME
+    return
 }
 
 $currentVersion = Get-CurrentInstalledVersion -StandaloneCurrentDir $currentDir
@@ -1012,6 +1130,10 @@ try {
 
         New-Item -ItemType Directory -Force -Path $standaloneRoot | Out-Null
         Ensure-Junction -LinkPath $currentDir -TargetPath $releaseDir -InstallerOwnedTargetPrefix $releasesDir
+        [System.IO.File]::WriteAllText(
+            $currentOwnerMarker,
+            (Get-NormalizedInstallerPath -Path $releaseDir) + [Environment]::NewLine
+        )
         if ($Release -eq "latest") {
             $tempMarker = "$autoUpdateVersion.tmp.$PID"
             [System.IO.File]::WriteAllText($tempMarker, $releaseName)

@@ -12,14 +12,10 @@ BIN_DIR="${MOEDEX_INSTALL_DIR:-${CODEX_INSTALL_DIR:-$HOME/.local/bin}}"
 BIN_PATH="$BIN_DIR/moedex"
 CODE_MODE_HOST_BIN_PATH="$BIN_DIR/codex-code-mode-host"
 CODEX_HOME_DIR="${MOEDEX_HOME:-${CODEX_HOME:-$HOME/.moedex}}"
-if [ -n "${MOEDEX_HOME:-}" ] || [ -z "${CODEX_HOME:-}" ]; then
-  HOME_OWNERSHIP="moedex"
-else
-  HOME_OWNERSHIP="shared-codex"
-fi
 STANDALONE_ROOT="$CODEX_HOME_DIR/packages/standalone"
 RELEASES_DIR="$STANDALONE_ROOT/releases"
 CURRENT_LINK="$STANDALONE_ROOT/current"
+CURRENT_OWNER_MARKER="$STANDALONE_ROOT/moedex-current-target"
 AUTO_UPDATE_VERSION="$STANDALONE_ROOT/auto-update-version"
 LOCK_FILE="$STANDALONE_ROOT/install.lock"
 LOCK_DIR="$STANDALONE_ROOT/install.lock.d"
@@ -119,6 +115,37 @@ remove_managed_link() {
   done
 }
 
+canonical_path() {
+  path="$1"
+  if [ -d "$path" ]; then
+    (cd "$path" && pwd -P)
+    return
+  fi
+
+  parent="$(dirname "$path")"
+  name="$(basename "$path")"
+  if canonical_parent="$(cd "$parent" 2>/dev/null && pwd -P)"; then
+    printf '%s/%s\n' "$canonical_parent" "$name"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+home_is_shared_with_codex() {
+  effective_home="$(canonical_path "$CODEX_HOME_DIR")"
+  default_codex_home="$(canonical_path "$HOME/.codex")"
+  if [ "$effective_home" = "$default_codex_home" ]; then
+    return 0
+  fi
+
+  if [ -n "${CODEX_HOME:-}" ] &&
+    [ "$effective_home" = "$(canonical_path "$CODEX_HOME")" ]; then
+    return 0
+  fi
+
+  return 1
+}
+
 uninstall_moedex() {
   remove_managed_link \
     "$BIN_PATH" \
@@ -128,11 +155,17 @@ uninstall_moedex() {
     "$CODE_MODE_HOST_BIN_PATH" \
     "$CURRENT_LINK/bin/codex-code-mode-host"
 
-  if [ "$HOME_OWNERSHIP" = "moedex" ]; then
+  if ! home_is_shared_with_codex; then
     current_target="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
-    case "$current_target" in
-      "$RELEASES_DIR"/*)
-        rm -f "$CURRENT_LINK"
+    canonical_current_target="$(canonical_path "$current_target")"
+    canonical_releases_dir="$(canonical_path "$RELEASES_DIR")"
+    recorded_target="$(cat "$CURRENT_OWNER_MARKER" 2>/dev/null || true)"
+    case "$canonical_current_target" in
+      "$canonical_releases_dir"/*)
+        if [ "$recorded_target" = "$canonical_current_target" ]; then
+          rm -f "$CURRENT_LINK"
+          rm -f "$CURRENT_OWNER_MARKER"
+        fi
         ;;
     esac
   else
@@ -987,6 +1020,9 @@ update_current_link() {
   tmp_link="$STANDALONE_ROOT/.current.$$"
 
   replace_path_with_symlink "$CURRENT_LINK" "$release_dir" "$tmp_link"
+  canonical_release_dir="$(canonical_path "$release_dir")"
+  printf '%s\n' "$canonical_release_dir" >"$CURRENT_OWNER_MARKER.tmp.$$"
+  mv -f "$CURRENT_OWNER_MARKER.tmp.$$" "$CURRENT_OWNER_MARKER"
 }
 
 release_codex_relative_path() {
