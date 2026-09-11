@@ -19,6 +19,15 @@ import moedex_behavior_manifest as behavior
 
 
 UPSTREAM_BASE = "8e2afc09126c0cea4c282725fe68af43adad73d7"
+VOICE_PLUGINS = (
+    "app",
+    "audioconvert",
+    "audioresample",
+    "coreelements",
+    "opus",
+    "rtp",
+    "rtpmanager",
+)
 
 
 def repository_manifest() -> dict:
@@ -32,6 +41,16 @@ def fixture_manifest() -> dict:
     manifest["sourceInventory"] = {
         "files": ["surface.txt", "second.txt"],
         "discoveryGlobs": ["*.txt"],
+        "policyScan": {
+            "roots": [".github/workflows"],
+            "extensions": [".txt", ".yml"],
+            "excludedDirectories": ["vendor"],
+            "excludedFileGlobs": ["test_*"],
+            "forbiddenRegex": [
+                r"https?://(?:api\.)?github\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+            ],
+            "allowedOccurrences": [],
+        },
         "expectations": [
             {
                 "path": "surface.txt",
@@ -82,10 +101,10 @@ def write_package(
         if Path(entrypoint).name == "moedex":
             voice_files = [
                 "codex-resources/voice/bin/codex-voice-host",
-                "codex-resources/voice/runtime.json",
                 "codex-resources/voice/NOTICE.md",
                 "codex-resources/voice/sources.json",
                 "codex-resources/voice/lib/libgstreamer-1.0.0.dylib",
+                "codex-resources/voice/lib/libgio-2.0.0.dylib",
                 "codex-resources/voice/licenses/LGPL-2.1.txt",
                 "codex-resources/voice/licenses/Opus.txt",
                 "codex-resources/voice/licenses/PCRE2.md",
@@ -94,6 +113,10 @@ def write_package(
                 "codex-resources/voice/licenses/sljit.txt",
                 "codex-resources/voice/licenses/zlib.txt",
             ]
+            voice_files.extend(
+                f"codex-resources/voice/plugins/libgst{name}.dylib"
+                for name in VOICE_PLUGINS
+            )
             payloads.extend(voice_files)
     for relative in payloads:
         path = root / relative
@@ -101,6 +124,34 @@ def write_package(
         path.write_text(relative, encoding="utf-8")
         path.chmod(0o755)
     if "apple-darwin" in target and Path(entrypoint).name == "moedex":
+        voice_root = root / "codex-resources/voice"
+        libraries = []
+        for relative in [
+            "lib/libgstreamer-1.0.0.dylib",
+            "lib/libgio-2.0.0.dylib",
+            *(f"plugins/libgst{name}.dylib" for name in VOICE_PLUGINS),
+        ]:
+            path = voice_root / relative
+            libraries.append(
+                {"path": relative, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            )
+        runtime = {
+            "schemaVersion": 1,
+            "developmentOnly": False,
+            "distribution": "publicRelease",
+            "target": target,
+            "sourceCommit": "f" * 40,
+            "sourceManifestSha256": hashlib.sha256(
+                (behavior.REPO_ROOT / "third_party/voice/sources.json").read_bytes()
+            ).hexdigest(),
+            "plugins": sorted(
+                f"plugins/libgst{name}.dylib" for name in VOICE_PLUGINS
+            ),
+            "libraries": libraries,
+        }
+        runtime_path = voice_root / "runtime.json"
+        runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+        payloads.append("codex-resources/voice/runtime.json")
         voice_payloads = [
             relative
             for relative in payloads
@@ -165,6 +216,7 @@ def write_symbols(path: Path, root_name: str, names: list[str], extension: str) 
 def source_fixture(root: Path) -> None:
     (root / "surface.txt").write_text("github.com/zak-keown/moedex")
     (root / "second.txt").write_text("release: disabled")
+    (root / ".github/workflows").mkdir(parents=True)
 
 
 def test_repository_manifest_is_complete_and_strict() -> None:
@@ -303,16 +355,20 @@ def test_source_inventory_is_an_exact_multiset_and_rejects_upstream_adoption(
     )
 
 
-def test_source_inventory_rejects_newly_discovered_surface(tmp_path: Path) -> None:
+def test_policy_scan_rejects_realistically_named_new_publish_workflow(
+    tmp_path: Path,
+) -> None:
     manifest = fixture_manifest()
     source_fixture(tmp_path)
-    (tmp_path / "new-update-surface.txt").write_text(
+    workflow = tmp_path / ".github/workflows/publish.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text(
         "https://github.com/openai/codex/releases/latest", encoding="utf-8"
     )
 
     errors = behavior.verify_source_inventory(manifest, tmp_path)
 
-    assert any("discovered source inventory differs" in error for error in errors)
+    assert any("policy scan forbidden target" in error for error in errors)
 
 
 def test_upstream_rebase_mutations_cannot_silently_drop_a_mapped_behavior(
@@ -470,6 +526,68 @@ def test_primary_macos_package_requires_voice_after_checksum_refresh(
     errors, _ = behavior.verify_artifacts(manifest, artifact_root)
 
     assert any("cli: missing required voice resource" in error for error in errors)
+
+
+def test_primary_macos_package_validates_runtime_declared_libraries(
+    tmp_path: Path,
+) -> None:
+    manifest = fixture_manifest()
+    artifact_root = tmp_path / "artifacts"
+    target = "aarch64-apple-darwin"
+    write_package(artifact_root / "cli", "bin/moedex", target)
+    write_package(artifact_root / "app-server", "bin/codex-app-server", target)
+    package = artifact_root / "cli"
+    missing = "codex-resources/voice/lib/libgio-2.0.0.dylib"
+    (package / missing).unlink()
+    package_manifest_path = package / "codex-package.json"
+    package_manifest = json.loads(package_manifest_path.read_text())
+    del package_manifest["checksums"][missing]
+    package_manifest_path.write_text(json.dumps(package_manifest))
+    voice_manifest_path = package / "codex-resources/voice/manifest.json"
+    voice_manifest = json.loads(voice_manifest_path.read_text())
+    del voice_manifest["sha256"][missing]
+    voice_manifest_path.write_text(json.dumps(voice_manifest))
+    package_manifest["checksums"]["codex-resources/voice/manifest.json"] = hashlib.sha256(
+        voice_manifest_path.read_bytes()
+    ).hexdigest()
+    package_manifest_path.write_text(json.dumps(package_manifest))
+
+    errors, _ = behavior.verify_artifacts(manifest, artifact_root)
+
+    assert any("invalid voice runtime" in error for error in errors)
+
+
+def test_primary_macos_package_rejects_malformed_runtime_receipt(
+    tmp_path: Path,
+) -> None:
+    manifest = fixture_manifest()
+    artifact_root = tmp_path / "artifacts"
+    target = "x86_64-apple-darwin"
+    write_package(artifact_root / "cli", "bin/moedex", target)
+    write_package(artifact_root / "app-server", "bin/codex-app-server", target)
+    package = artifact_root / "cli"
+    runtime_path = package / "codex-resources/voice/runtime.json"
+    runtime_path.write_text("{", encoding="utf-8")
+    voice_manifest_path = package / "codex-resources/voice/manifest.json"
+    voice_manifest = json.loads(voice_manifest_path.read_text())
+    voice_manifest["sha256"]["codex-resources/voice/runtime.json"] = hashlib.sha256(
+        runtime_path.read_bytes()
+    ).hexdigest()
+    voice_manifest_path.write_text(json.dumps(voice_manifest))
+    package_manifest_path = package / "codex-package.json"
+    package_manifest = json.loads(package_manifest_path.read_text())
+    for relative in (
+        "codex-resources/voice/runtime.json",
+        "codex-resources/voice/manifest.json",
+    ):
+        package_manifest["checksums"][relative] = hashlib.sha256(
+            (package / relative).read_bytes()
+        ).hexdigest()
+    package_manifest_path.write_text(json.dumps(package_manifest))
+
+    errors, _ = behavior.verify_artifacts(manifest, artifact_root)
+
+    assert any("invalid voice runtime" in error for error in errors)
 
 
 def test_app_server_macos_package_rejects_unexpected_voice_resources(

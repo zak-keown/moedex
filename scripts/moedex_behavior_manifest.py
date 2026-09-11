@@ -15,6 +15,10 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+VOICE_RUNTIME_ROOT = REPO_ROOT / "third_party/voice"
+sys.path.insert(0, str(VOICE_RUNTIME_ROOT))
+from package_runtime import runtime_files as validate_voice_runtime_files
+
 MANIFEST_PATH = REPO_ROOT / "moedex-behavior-manifest.json"
 UPSTREAM_BASE = "8e2afc09126c0cea4c282725fe68af43adad73d7"
 REQUIRED_IDS = tuple([f"B{number}" for number in range(1, 14)] + ["U4", "U5"])
@@ -48,9 +52,19 @@ SOURCE_INVENTORY_FIELDS = {
     "discoveryGlobs",
     "expectations",
     "forbiddenRegex",
+    "policyScan",
 }
 EXPECTATION_FIELDS = {"path", "literal", "count"}
 FORBIDDEN_FIELDS = {"path", "pattern"}
+POLICY_SCAN_FIELDS = {
+    "roots",
+    "extensions",
+    "excludedDirectories",
+    "excludedFileGlobs",
+    "forbiddenRegex",
+    "allowedOccurrences",
+}
+POLICY_ALLOWED_FIELDS = {"path", "pattern", "count"}
 
 
 def _unknown_fields(value: dict[str, Any], allowed: set[str], label: str) -> list[str]:
@@ -242,6 +256,92 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
                             f"duplicate source inventory discovery glob: {pattern}"
                         )
                     seen_globs.add(pattern)
+        policy = inventory.get("policyScan")
+        if not isinstance(policy, dict):
+            errors.append("sourceInventory policyScan must be an object")
+        else:
+            errors.extend(
+                _unknown_fields(policy, POLICY_SCAN_FIELDS, "sourceInventory policyScan")
+            )
+            for field in ("roots", "excludedFileGlobs"):
+                values = policy.get(field)
+                if not isinstance(values, list) or not values:
+                    errors.append(f"sourceInventory policyScan {field} must be nonempty")
+                    continue
+                seen: set[str] = set()
+                for value in values:
+                    path, path_errors = _safe_relative_path(
+                        value, f"sourceInventory policyScan {field} entry"
+                    )
+                    errors.extend(path_errors)
+                    if path is not None:
+                        if path in seen:
+                            errors.append(
+                                f"duplicate sourceInventory policyScan {field}: {path}"
+                            )
+                        seen.add(path)
+            extensions = policy.get("extensions")
+            if (
+                not isinstance(extensions, list)
+                or not extensions
+                or any(
+                    not isinstance(value, str)
+                    or (value and not value.startswith("."))
+                    or "/" in value
+                    for value in extensions
+                )
+            ):
+                errors.append(
+                    "sourceInventory policyScan extensions must be file suffixes"
+                )
+            excluded = policy.get("excludedDirectories")
+            if (
+                not isinstance(excluded, list)
+                or not excluded
+                or any(
+                    not isinstance(value, str)
+                    or not value
+                    or "/" in value
+                    or value in {".", ".."}
+                    for value in excluded
+                )
+            ):
+                errors.append(
+                    "sourceInventory policyScan excludedDirectories must be names"
+                )
+            policy_patterns = policy.get("forbiddenRegex")
+            if not isinstance(policy_patterns, list) or not policy_patterns:
+                errors.append(
+                    "sourceInventory policyScan forbiddenRegex must be nonempty"
+                )
+            else:
+                for pattern in policy_patterns:
+                    if not isinstance(pattern, str) or not pattern:
+                        errors.append("policy scan forbiddenRegex must be nonempty")
+                        continue
+                    try:
+                        re.compile(pattern)
+                    except re.error as error:
+                        errors.append(f"invalid policy scan regex {pattern!r}: {error}")
+            allowed = policy.get("allowedOccurrences")
+            if not isinstance(allowed, list):
+                errors.append(
+                    "sourceInventory policyScan allowedOccurrences must be an array"
+                )
+            else:
+                for index, item in enumerate(allowed):
+                    label = f"policy allowedOccurrences[{index}]"
+                    if not isinstance(item, dict):
+                        errors.append(f"{label} must be an object")
+                        continue
+                    errors.extend(_unknown_fields(item, POLICY_ALLOWED_FIELDS, label))
+                    _, path_errors = _safe_relative_path(item.get("path"), f"{label} path")
+                    errors.extend(path_errors)
+                    if item.get("pattern") not in (policy_patterns or []):
+                        errors.append(f"{label} pattern is not a policy regex")
+                    count = item.get("count")
+                    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                        errors.append(f"{label} count must be a nonnegative integer")
         covered_files: set[str] = set()
         expectations = inventory.get("expectations")
         if not isinstance(expectations, list) or not expectations:
@@ -361,6 +461,48 @@ def verify_source_inventory(manifest: dict[str, Any], repo_root: Path) -> list[s
                 "forbidden upstream adoption target matched in "
                 f"{item['path']}: {item['pattern']}"
             )
+    policy = inventory["policyScan"]
+    excluded_directories = set(policy["excludedDirectories"])
+    excluded_globs = tuple(policy["excludedFileGlobs"])
+    extensions = set(policy["extensions"])
+    policy_contents: dict[str, str] = {}
+    for relative_root in policy["roots"]:
+        root = repo_root / relative_root
+        try:
+            resolved_root = root.resolve(strict=True)
+            resolved_repo = repo_root.resolve(strict=True)
+        except FileNotFoundError:
+            errors.append(f"missing policy scan root: {relative_root}")
+            continue
+        if resolved_repo != resolved_root and resolved_repo not in resolved_root.parents:
+            errors.append(f"policy scan root escapes repository: {relative_root}")
+            continue
+        for path in root.rglob("*"):
+            relative = path.relative_to(repo_root)
+            if (
+                any(part in excluded_directories for part in relative.parts)
+                or any(relative.match(pattern) for pattern in excluded_globs)
+                or path.suffix not in extensions
+                or not path.is_file()
+            ):
+                continue
+            try:
+                policy_contents[relative.as_posix()] = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+    allowed = {
+        (item["path"], item["pattern"]): item["count"]
+        for item in policy["allowedOccurrences"]
+    }
+    for path, contents_text in policy_contents.items():
+        for pattern in policy["forbiddenRegex"]:
+            count = len(re.findall(pattern, contents_text, re.IGNORECASE))
+            expected = allowed.get((path, pattern), 0)
+            if count != expected:
+                errors.append(
+                    f"policy scan forbidden target occurrence mismatch in {path}: "
+                    f"expected {expected}, got {count} for {pattern}"
+                )
     return errors
 
 
@@ -708,10 +850,23 @@ def _validate_voice_resources(
     if manifest_path is None:
         return errors
     try:
+        runtime_files = validate_voice_runtime_files(
+            voice_root.resolve(strict=True),
+            package_metadata.get("target"),
+            public_release=True,
+        )
+        runtime_receipt = json.loads(
+            (voice_root / "runtime.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return [*errors, f"invalid voice runtime: {error}"]
+    provenance = package_metadata.get("provenance", {})
+    if runtime_receipt.get("sourceCommit") != provenance.get("forkCommit"):
+        errors.append("voice runtime source commit does not match package provenance")
+    try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
         return [*errors, f"invalid voice manifest: {error}"]
-    provenance = package_metadata.get("provenance", {})
     expected_fields = {
         "schemaVersion": 1,
         "buildCommit": provenance.get("forkCommit"),
@@ -736,6 +891,12 @@ def _validate_voice_resources(
     expected_payloads = {package_metadata.get("entrypoint"), *voice_payloads}
     if set(digests) != expected_payloads:
         errors.append("voice manifest does not exactly cover app and voice payloads")
+    for relative, expected in runtime_files.items():
+        manifest_relative = f"codex-resources/voice/{relative}"
+        if digests.get(manifest_relative) != expected:
+            errors.append(
+                f"voice manifest does not bind validated runtime: {manifest_relative}"
+            )
     for relative, expected in digests.items():
         safe, safe_errors = _safe_relative_path(relative, "voice checksum path")
         errors.extend(safe_errors)

@@ -842,6 +842,56 @@
       ".github/scripts/export-release-provenance.sh",
       ".github/workflows/moedex-qualification.yml",
       ".github/workflows/*release*.yml"
-    ]
+    ],
+    "policyScan": {
+      "roots": [
+        ".github/workflows",
+        ".github/scripts",
+        "scripts",
+        "codex-cli",
+        "codex-rs"
+      ],
+      "extensions": [
+        "",
+        ".bzl",
+        ".js",
+        ".json",
+        ".ps1",
+        ".py",
+        ".rs",
+        ".sh",
+        ".toml",
+        ".yaml",
+        ".yml"
+      ],
+      "excludedDirectories": [
+        ".venv",
+        "fixtures",
+        "node_modules",
+        "snapshots",
+        "target",
+        "testdata",
+        "tests",
+        "vendor"
+      ],
+      "excludedFileGlobs": [
+        "**/*_test.py",
+        "**/*_tests.rs",
+        "**/test_*.py",
+        "**/tests.rs"
+      ],
+      "forbiddenRegex": [
+        "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)",
+        "(?:npm\\s+(?:install|publish)|pnpm\\s+(?:add|publish)|bun\\s+(?:install|publish)|vp\\s+install)[^\\n]*@openai/codex",
+        "formulae\\.brew\\.sh/(?:api/)?cask/codex"
+      ],
+      "allowedOccurrences": [
+        {
+          "path": "scripts/codex_package/v8.py",
+          "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)",
+          "count": 1
+        }
+      ]
+    }
   }
 }
