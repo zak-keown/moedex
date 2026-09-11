@@ -18,8 +18,8 @@ dispositions:
   fixed: 35
   stale: 0
   skipped: 1
-  deferred: 6
-  open: 218
+  deferred: 7
+  open: 217
 ---
 
 # Codebase Review — moedex
@@ -1335,6 +1335,10 @@ Fix: only remove the pending entry after `resolve_server_request` succeeds
 possible), and drop the generic "Not available in TUI yet" fallback message
 for this failure path so the user isn't shown a confusing, unrelated error.
 
+**Disposition:** deferred
+**Commit:** —
+**Resolved:** 2026-09-11
+**Note:** Premise confirmed on current tree: try_resolve_app_server_request (thread_routing.rs:1060) calls pending_app_server_requests.take_resolution(...) — which REMOVES the entry from exec_approvals/file_change_approvals/permissions_approvals/pop_user_input_request_for_turn/user_verification — BEFORE app_server.resolve_server_request (line 1069). On RPC Err it returns Ok(false) with the entry already gone, so the decision cannot be resubmitted; submit_thread_op (line 533-553) then cannot distinguish 'no pending resolution' from 'delivery failed' and falls through to try_submit_active_thread_op_via_app_server (which returns false for ExecApproval/PatchApproval/ResolveElicitation/ResolveUserVerification/UserInputAnswer/RequestPermissionsResponse), showing the misleading 'Not available in TUI yet' message on top of 'Failed to resolve...'. Not attempted here because a correct fix is a substantial, security-sensitive refactor: take_resolution must peek/build the resolution without consuming (or re-insert per-variant on failure), across all six approval variants INCLUDING the ResolveUserVerification->ResolveElicitation transform that also removes user_verification state early, and submit_thread_op must treat 'attempted-but-failed' as handled (drop the fallback message). A deterministic red test requires simulating an app-server resolve_server_request failure (a closed/broken transport) — the test harness uses a real in-process app-server, so there is no clean deterministic failure seam. Applying this unverified (no red/green) risks a latent approval-handling bug. Recommended fix (for a follow-up with an RPC-failure harness): peek-then-commit-on-success or re-insert-on-failure in take_resolution, and return a tri-state (NoPending | Resolved | FailedToDeliver) from try_resolve so submit_thread_op suppresses the 'Not available in TUI yet' message on FailedToDeliver. Nothing touched.
 ### CR-035: `/usage` command output can silently vanish when re-invoked before the previous card is inserted into history
 **File:** `codex-rs/tui/src/chatwidget/tokens.rs`
 **Anchor:** `add_token_activity_output`
