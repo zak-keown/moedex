@@ -5,6 +5,74 @@ use toml::Value as TomlValue;
 
 use crate::utils::invalid_data_error;
 
+pub(crate) fn sanitized_codex_config(raw: &str) -> io::Result<(Vec<u8>, Vec<String>)> {
+    let _: codex_config::config_toml::ConfigToml = toml::from_str(raw)
+        .map_err(|_| invalid_data_error("Codex config contains unsupported settings"))?;
+    let mut value: TomlValue =
+        toml::from_str(raw).map_err(|_| invalid_data_error("Codex config is not valid TOML"))?;
+    let mut review_reasons = Vec::new();
+    sanitize_codex_value(&mut value, &mut Vec::new(), &mut review_reasons);
+    let rendered =
+        toml::to_string_pretty(&value).map_err(|err| invalid_data_error(err.to_string()))?;
+    Ok((rendered.into_bytes(), review_reasons))
+}
+
+fn sanitize_codex_value(
+    value: &mut TomlValue,
+    path: &mut Vec<String>,
+    review_reasons: &mut Vec<String>,
+) {
+    let TomlValue::Table(table) = value else {
+        return;
+    };
+    let keys = table.keys().cloned().collect::<Vec<_>>();
+    for key in keys {
+        path.push(key.clone());
+        let dotted = path.join(".");
+        let key_lower = key.to_ascii_lowercase();
+        let remove_for_trust = path.first().is_some_and(|root| root == "projects");
+        let remove_for_secret = ["secret", "token", "password", "api_key", "apikey"]
+            .iter()
+            .any(|fragment| key_lower.contains(fragment));
+        let remove_for_execution = ["hook", "notify", "command", "executable"]
+            .iter()
+            .any(|fragment| key_lower.contains(fragment));
+        let remove_for_path = table.get(&key).is_some_and(contains_absolute_path);
+        if remove_for_trust || remove_for_secret || remove_for_execution || remove_for_path {
+            table.remove(&key);
+            let reason = if remove_for_trust {
+                "project trust"
+            } else if remove_for_secret {
+                "sensitive value"
+            } else if remove_for_execution {
+                "executable or hook setting"
+            } else {
+                "home-bound or absolute path"
+            };
+            review_reasons.push(if remove_for_secret {
+                "sensitive value omitted from import; review the source config manually".to_string()
+            } else {
+                format!("{dotted}: {reason} requires manual review")
+            });
+        } else if let Some(child) = table.get_mut(&key) {
+            sanitize_codex_value(child, path, review_reasons);
+        }
+        path.pop();
+    }
+}
+
+fn contains_absolute_path(value: &TomlValue) -> bool {
+    match value {
+        TomlValue::String(value) => Path::new(value).is_absolute(),
+        TomlValue::Array(values) => values.iter().any(contains_absolute_path),
+        TomlValue::Table(table) => table.values().any(contains_absolute_path),
+        TomlValue::Integer(_)
+        | TomlValue::Float(_)
+        | TomlValue::Boolean(_)
+        | TomlValue::Datetime(_) => false,
+    }
+}
+
 pub(super) fn merge_missing_toml_values(
     existing: &mut TomlValue,
     incoming: &TomlValue,

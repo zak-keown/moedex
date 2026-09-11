@@ -1,4 +1,5 @@
 mod cla;
+pub(crate) mod codex;
 mod cur;
 
 use crate::invalid_data_error;
