@@ -8,7 +8,7 @@ plans:
     plan: docs/moe/plans/2026-09-10-moedex-brand-foundation.md
     depends_on: []
     status: done
-    commit_range: e772a65de5..4a5680e75f
+    commit_range: e772a65de5..31eddc7d64
   - id: runtime-reliability
     plan: docs/moe/plans/2026-09-10-moedex-runtime-reliability.md
     depends_on: [brand-foundation]
