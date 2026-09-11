@@ -175,6 +175,49 @@ async fn credential_apply_rejects_a_source_change_after_preview_without_mutation
 }
 
 #[tokio::test]
+async fn a_new_credential_preview_cannot_replace_an_older_preview_registration() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(&source).expect("source");
+    fs::create_dir_all(&destination).expect("destination");
+    fs::write(
+        source.join("auth.json"),
+        r#"{"auth_mode":"apikey","OPENAI_API_KEY":"first-secret"}"#,
+    )
+    .expect("first source auth");
+    let selection = CodexImportSelection {
+        settings: false,
+        sessions: false,
+        credentials: true,
+        conflict_policy: ConflictPolicy::Skip,
+    };
+    let first = preview_codex_import(abs(&source), abs(&destination), selection.clone())
+        .await
+        .expect("first preview");
+    fs::write(
+        source.join("auth.json"),
+        r#"{"auth_mode":"apikey","OPENAI_API_KEY":"second-secret"}"#,
+    )
+    .expect("second source auth");
+    let second = preview_codex_import(abs(&source), abs(&destination), selection)
+        .await
+        .expect("second preview");
+
+    assert_ne!(first.id, second.id);
+    let error = apply_codex_import(&first.id, first.selection.clone())
+        .await
+        .expect_err("the first preview must retain its original credential state");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(!destination.join("moedex-auth.json").exists());
+    let expired = apply_codex_import(&first.id, first.selection)
+        .await
+        .expect_err("the stale first preview must be invalidated");
+    assert_eq!(expired.kind(), std::io::ErrorKind::NotFound);
+    cancel_codex_import(&second.id).expect("cancel second preview");
+}
+
+#[tokio::test]
 async fn credential_apply_rejects_a_destination_change_after_preview_without_mutation() {
     let root = TempDir::new().expect("tempdir");
     let source = root.path().join("source");

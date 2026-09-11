@@ -120,6 +120,47 @@ fn importing_file_auth_writes_only_the_destination_and_redacts_outcome() -> anyh
 }
 
 #[test]
+fn credential_preview_cannot_be_replayed_with_different_storage_adapters() -> anyhow::Result<()> {
+    let first_source_home = tempdir()?;
+    let first_destination_home = tempdir()?;
+    let second_source_home = tempdir()?;
+    let second_destination_home = tempdir()?;
+    let auth = api_key_auth("same-secret");
+    let first_source = storage(
+        first_source_home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Codex,
+    );
+    let first_destination = storage(
+        first_destination_home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Moedex,
+    );
+    let second_source = storage(
+        second_source_home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Codex,
+    );
+    let second_destination = storage(
+        second_destination_home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Moedex,
+    );
+    first_source.write_for_test(&auth)?;
+    second_source.write_for_test(&auth)?;
+    let preview = preview_auth_record(&first_source, &first_destination)?;
+
+    let error = import_auth_record_from_preview(&second_source, &second_destination, &preview)
+        .expect_err("preview must be bound to its original adapters");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(error.to_string().contains("storage adapters differ"));
+    assert_eq!(second_destination.read_for_test()?, None);
+    assert_eq!(first_destination.read_for_test()?, None);
+    Ok(())
+}
+
+#[test]
 fn moedex_file_auth_in_a_shared_compatibility_home_never_touches_stock_auth() -> anyhow::Result<()>
 {
     let shared_home = tempdir()?;

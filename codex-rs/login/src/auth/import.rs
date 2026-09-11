@@ -33,6 +33,8 @@ pub struct AuthStorage {
     backend: Arc<dyn AuthStorageBackend>,
     home: PathBuf,
     mode: AuthCredentialsStoreMode,
+    keyring_backend_kind: AuthKeyringBackendKind,
+    namespace: AuthStorageNamespace,
 }
 
 /// Opaque credential state captured for a preview-bound import.
@@ -41,8 +43,18 @@ pub struct AuthStorage {
 /// implement `Debug` or serialization.
 #[derive(Clone, Eq, PartialEq)]
 pub struct AuthImportPreview {
+    source_adapter: AuthAdapterIdentity,
+    destination_adapter: AuthAdapterIdentity,
     source: AuthRecordState,
     destination: AuthRecordState,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct AuthAdapterIdentity {
+    home: PathBuf,
+    mode: AuthCredentialsStoreMode,
+    keyring_backend_kind: AuthKeyringBackendKind,
+    namespace: AuthStorageNamespace,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -124,6 +136,8 @@ impl AuthStorage {
             ),
             home,
             mode,
+            keyring_backend_kind,
+            namespace,
         }
     }
 
@@ -187,6 +201,8 @@ pub fn preview_auth_record(
 ) -> std::io::Result<AuthImportPreview> {
     ensure_distinct_homes(&source.home, &destination.home)?;
     Ok(AuthImportPreview {
+        source_adapter: auth_adapter_identity(source)?,
+        destination_adapter: auth_adapter_identity(destination)?,
         source: read_auth_state(source)?.0,
         destination: read_auth_state(destination)?.0,
     })
@@ -229,6 +245,14 @@ fn import_auth_record_from_preview_with_replacement(
     replace: bool,
 ) -> std::io::Result<AuthImportOutcome> {
     ensure_distinct_homes(&source.home, &destination.home)?;
+    if auth_adapter_identity(source)? != preview.source_adapter
+        || auth_adapter_identity(destination)? != preview.destination_adapter
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "credential storage adapters differ from preview",
+        ));
+    }
     if source.mode == AuthCredentialsStoreMode::Ephemeral {
         return Ok(AuthImportOutcome::SignInRequired);
     }
@@ -280,6 +304,15 @@ fn import_auth_record_from_preview_with_replacement(
         Ok(()) => Ok(AuthImportOutcome::Imported),
         Err(_) => Ok(AuthImportOutcome::Failed),
     }
+}
+
+fn auth_adapter_identity(storage: &AuthStorage) -> std::io::Result<AuthAdapterIdentity> {
+    Ok(AuthAdapterIdentity {
+        home: canonical_home(&storage.home)?,
+        mode: storage.mode,
+        keyring_backend_kind: storage.keyring_backend_kind,
+        namespace: storage.namespace,
+    })
 }
 
 fn read_auth_state(

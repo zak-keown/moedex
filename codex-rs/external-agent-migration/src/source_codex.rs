@@ -120,7 +120,7 @@ enum PlannedCredential {
     Ready {
         source: AuthStorage,
         destination: AuthStorage,
-        preview: AuthImportPreview,
+        preview: Box<AuthImportPreview>,
     },
     Unavailable(AuthImportOutcome),
 }
@@ -159,6 +159,7 @@ struct ImportLedger {
 }
 
 static PREVIEWS: OnceLock<Mutex<PreviewRegistry>> = OnceLock::new();
+static PREVIEW_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub async fn preview_codex_import(
@@ -577,7 +578,7 @@ fn planned_credential_import(
         credential: Some(PlannedCredential::Ready {
             source,
             destination,
-            preview: credential_preview,
+            preview: Box::new(credential_preview),
         }),
     })
 }
@@ -861,6 +862,12 @@ fn preview_id(
     items: &[PlannedItem],
 ) -> String {
     let mut digest = Sha256::new();
+    digest.update(std::process::id().to_le_bytes());
+    digest.update(
+        PREVIEW_SEQUENCE
+            .fetch_add(1, Ordering::Relaxed)
+            .to_le_bytes(),
+    );
     digest.update(source.as_os_str().as_encoded_bytes());
     digest.update(destination.as_os_str().as_encoded_bytes());
     digest.update(serde_json::to_vec(selection).unwrap_or_default());
