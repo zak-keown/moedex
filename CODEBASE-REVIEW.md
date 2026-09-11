@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 28
+  fixed: 29
   stale: 0
   skipped: 1
   deferred: 6
-  open: 225
+  open: 224
 ---
 
 # Codebase Review — moedex
@@ -1002,6 +1002,10 @@ inside them), or switch to a delimiter scheme that cannot be forged by
 skill-authored text (e.g. length-prefixed framing rather than literal
 in-band markers).
 
+**Disposition:** fixed
+**Commit:** `967ef2f0a3`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-027: Per-cwd host skills cache ignores config layer stack, serving stale skill enable/disable decisions across sessions/requests
 
 **File:** `codex-rs/ext/skills/src/host_service.rs`
