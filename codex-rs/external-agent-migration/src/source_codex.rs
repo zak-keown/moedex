@@ -4,7 +4,12 @@ use crate::model::ConflictPolicy;
 use crate::sessions::records_codex::codex_rollout_thread_id;
 use crate::sessions::records_codex::validate_codex_rollout;
 use crate::source::codex::RolloutDiscoveryLimits;
+use crate::source::codex::auth_storage_config;
 use crate::source::codex::discover_rollouts;
+use codex_login::AuthImportOutcome;
+use codex_login::AuthStorage;
+use codex_login::AuthStorageNamespace;
+use codex_login::import_auth_record;
 use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path::write_atomically as replace_text_atomically;
@@ -70,6 +75,8 @@ pub struct ImportReport {
     pub skipped: usize,
     pub already_present: usize,
     pub unsupported: usize,
+    pub sign_in_required: usize,
+    pub failed: usize,
     pub backups: Vec<PathBuf>,
     pub source_hashes: Vec<String>,
     pub items: Vec<ImportItemOutcome>,
@@ -82,6 +89,9 @@ pub enum ImportDisposition {
     SkippedConflict,
     AlreadyPresent,
     Unsupported,
+    Skipped,
+    SignInRequired,
+    Failed,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -248,10 +258,8 @@ pub async fn preview_codex_import(
                 relative_path: PathBuf::from(AUTH_FILE),
                 source_sha256: None,
                 conflict: false,
-                requires_review: true,
-                review_reasons: vec![
-                    "credential transfer is unavailable; sign in to Moedex instead".to_string(),
-                ],
+                requires_review: false,
+                review_reasons: Vec::new(),
             },
             source: None,
             payload: None,
@@ -346,6 +354,10 @@ pub async fn apply_codex_import(
     };
 
     for item in plan.items {
+        if item.preview.kind == ImportItemKind::Credentials {
+            apply_credential_import(&source, &destination, &item.preview, &mut report);
+            continue;
+        }
         let Some(payload) = item.payload else {
             report.unsupported = report.unsupported.saturating_add(1);
             report.items.push(item_outcome(
@@ -447,6 +459,59 @@ pub async fn apply_codex_import(
     }
     cancel_codex_import(preview_id)?;
     Ok(report)
+}
+
+fn apply_credential_import(
+    source_home: &Path,
+    destination_home: &Path,
+    preview: &ImportPreviewItem,
+    report: &mut ImportReport,
+) {
+    let source_config = auth_storage_config(source_home);
+    let destination_config = auth_storage_config(destination_home);
+    let source = AuthStorage::new(
+        source_home.to_path_buf(),
+        source_config.mode,
+        source_config.keyring_backend,
+        AuthStorageNamespace::Codex,
+    );
+    let destination = AuthStorage::new(
+        destination_home.to_path_buf(),
+        destination_config.mode,
+        destination_config.keyring_backend,
+        AuthStorageNamespace::Moedex,
+    );
+    let outcome = import_auth_record(&source, &destination).unwrap_or(AuthImportOutcome::Failed);
+    let (disposition, reason) = match outcome {
+        AuthImportOutcome::Imported => {
+            report.imported = report.imported.saturating_add(1);
+            (ImportDisposition::Imported, None)
+        }
+        AuthImportOutcome::Skipped => {
+            report.skipped = report.skipped.saturating_add(1);
+            (
+                ImportDisposition::Skipped,
+                Some("no stored credentials found".to_string()),
+            )
+        }
+        AuthImportOutcome::SignInRequired => {
+            report.sign_in_required = report.sign_in_required.saturating_add(1);
+            (
+                ImportDisposition::SignInRequired,
+                Some("stored credentials require a fresh Moedex sign-in".to_string()),
+            )
+        }
+        AuthImportOutcome::Failed => {
+            report.failed = report.failed.saturating_add(1);
+            (
+                ImportDisposition::Failed,
+                Some("credential destination is unavailable".to_string()),
+            )
+        }
+    };
+    report
+        .items
+        .push(item_outcome(preview, disposition, reason));
 }
 
 pub fn cancel_codex_import(preview_id: &str) -> io::Result<bool> {

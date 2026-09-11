@@ -49,6 +49,94 @@ async fn preview_and_cancel_leave_both_homes_byte_identical() {
 }
 
 #[tokio::test]
+async fn explicitly_selected_credentials_import_without_entering_preview() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(&source).expect("source");
+    fs::create_dir_all(&destination).expect("destination");
+    let secret = "credential-import-secret";
+    fs::write(
+        source.join("auth.json"),
+        serde_json::json!({
+            "auth_mode": "apikey",
+            "OPENAI_API_KEY": secret,
+            "tokens": null,
+            "last_refresh": null
+        })
+        .to_string(),
+    )
+    .expect("source auth");
+
+    let preview = preview_codex_import(
+        abs(&source),
+        abs(&destination),
+        CodexImportSelection {
+            settings: false,
+            sessions: false,
+            credentials: true,
+            conflict_policy: ConflictPolicy::Skip,
+        },
+    )
+    .await
+    .expect("preview");
+    assert!(!format!("{preview:?}").contains(secret));
+    assert_eq!(preview.items[0].kind, ImportItemKind::Credentials);
+    assert_eq!(preview.items[0].source_sha256, None);
+
+    let report = apply_codex_import(&preview.id, preview.selection.clone())
+        .await
+        .expect("apply");
+    assert_eq!(report.imported, 1);
+    assert_eq!(report.items[0].disposition, ImportDisposition::Imported);
+    assert!(!format!("{report:?}").contains(secret));
+    assert!(
+        fs::read_to_string(destination.join("auth.json"))
+            .expect("destination auth")
+            .contains(secret)
+    );
+    assert!(
+        fs::read_to_string(source.join("auth.json"))
+            .expect("source auth")
+            .contains(secret)
+    );
+}
+
+#[tokio::test]
+async fn missing_or_invalid_credentials_report_sign_in_required() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(&source).expect("source");
+    fs::create_dir_all(&destination).expect("destination");
+    fs::write(
+        source.join("auth.json"),
+        r#"{"auth_mode":"chatgpt","OPENAI_API_KEY":null,"tokens":{"id_token":"e30.e30.c2ln","access_token":"expired","refresh_token":""}}"#,
+    )
+    .expect("invalid source auth");
+
+    let selection = CodexImportSelection {
+        settings: false,
+        sessions: false,
+        credentials: true,
+        conflict_policy: ConflictPolicy::Skip,
+    };
+    let preview = preview_codex_import(abs(&source), abs(&destination), selection)
+        .await
+        .expect("preview");
+    let report = apply_codex_import(&preview.id, preview.selection.clone())
+        .await
+        .expect("apply");
+
+    assert_eq!(report.sign_in_required, 1);
+    assert_eq!(
+        report.items[0].disposition,
+        ImportDisposition::SignInRequired
+    );
+    assert!(!destination.join("auth.json").exists());
+}
+
+#[tokio::test]
 async fn rejects_direct_and_symlinked_source_destination_equality() {
     let root = TempDir::new().expect("tempdir");
     let home = root.path().join("home");

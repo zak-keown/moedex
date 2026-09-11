@@ -35,7 +35,7 @@ struct CodexImportArgs {
     #[arg(long)]
     sessions: bool,
 
-    /// Request credential import. Unsupported backends require a fresh login.
+    /// Import credentials through isolated Codex and Moedex storage adapters.
     #[arg(long)]
     credentials: bool,
 

@@ -1,7 +1,42 @@
+use codex_config::types::AuthCredentialsStoreMode;
+use codex_config::types::AuthKeyringBackendKind;
 use std::fs;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct AuthStorageConfig {
+    pub mode: AuthCredentialsStoreMode,
+    pub keyring_backend: AuthKeyringBackendKind,
+}
+
+pub(crate) fn auth_storage_config(home: &Path) -> AuthStorageConfig {
+    let Ok(raw) = fs::read_to_string(home.join("config.toml")) else {
+        return AuthStorageConfig::default();
+    };
+    let Ok(value) = raw.parse::<toml::Value>() else {
+        return AuthStorageConfig::default();
+    };
+    let mode = value
+        .get("cli_auth_credentials_store")
+        .cloned()
+        .and_then(|value| value.try_into().ok())
+        .unwrap_or_default();
+    let uses_secrets = value
+        .get("features")
+        .and_then(|features| features.get("secret_auth_storage"))
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false);
+    AuthStorageConfig {
+        mode,
+        keyring_backend: if uses_secrets {
+            AuthKeyringBackendKind::Secrets
+        } else {
+            AuthKeyringBackendKind::Direct
+        },
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct RolloutDiscoveryLimits {

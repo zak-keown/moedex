@@ -12,8 +12,14 @@ mod util;
 mod workload_identity;
 
 mod external_bearer;
+mod import;
 mod manager;
 mod revoke;
+
+pub use import::AuthImportOutcome;
+pub use import::AuthStorage;
+pub use import::AuthStorageNamespace;
+pub use import::import_auth_record;
 
 pub use auth_headers::AuthHeaders;
 pub use bedrock_access_keys::BedrockAccessKeysAuth;

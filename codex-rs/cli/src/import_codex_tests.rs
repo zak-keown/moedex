@@ -27,3 +27,13 @@ fn codex_import_help_exposes_safe_selection_controls() {
         assert!(help.contains(flag), "missing {flag} from {help}");
     }
 }
+
+#[test]
+fn codex_import_does_not_select_credentials_implicitly() {
+    let cli =
+        TestCli::try_parse_from(["moedex", "import", "codex", "--settings"]).expect("parse import");
+    let rendered = format!("{:?}", cli.command);
+
+    assert!(rendered.contains("settings: true"));
+    assert!(rendered.contains("credentials: false"));
+}

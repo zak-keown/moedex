@@ -12,6 +12,8 @@ use std::io::Read;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -37,7 +39,7 @@ use codex_secrets::SecretsManager;
 use once_cell::sync::Lazy;
 
 /// Expected structure for $CODEX_HOME/auth.json.
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, PartialEq)]
 pub struct AuthDotJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_mode: Option<AuthMode>,
@@ -62,6 +64,30 @@ pub struct AuthDotJson {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bedrock_access_keys: Option<BedrockAccessKeysAuth>,
+}
+
+impl Debug for AuthDotJson {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthDotJson")
+            .field("auth_mode", &self.auth_mode)
+            .field(
+                "openai_api_key",
+                &self.openai_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field("tokens", &self.tokens.as_ref().map(|_| "<redacted>"))
+            .field("last_refresh", &self.last_refresh)
+            .field(
+                "agent_identity",
+                &self.agent_identity.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "personal_access_token",
+                &self.personal_access_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("bedrock_api_key", &self.bedrock_api_key)
+            .field("bedrock_access_keys", &self.bedrock_access_keys)
+            .finish()
+    }
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
@@ -166,6 +192,9 @@ pub(super) fn delete_file_if_exists(codex_home: &Path) -> std::io::Result<bool> 
 
 pub(super) trait AuthStorageBackend: Debug + Send + Sync {
     fn load(&self) -> std::io::Result<Option<AuthDotJson>>;
+    fn load_for_import(&self) -> std::io::Result<Option<AuthDotJson>> {
+        self.load()
+    }
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()>;
     fn delete(&self) -> std::io::Result<bool>;
 }
@@ -217,6 +246,8 @@ impl AuthStorageBackend for FileAuthStorage {
             options.mode(0o600);
         }
         let mut file = options.open(auth_file)?;
+        #[cfg(unix)]
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         file.write_all(json_data.as_bytes())?;
         file.flush()?;
         Ok(())
@@ -232,10 +263,36 @@ static CODEX_AUTH_SECRET_NAME: Lazy<SecretName> =
         Ok(name) => name,
         Err(err) => unreachable!("CODEX_AUTH should be a valid secret name: {err}"),
     });
+const CODEX_KEYRING_SERVICE: &str = "Codex Auth";
+#[cfg(test)]
 const KEYRING_SERVICE: &str = codex_product_identity::PRODUCT_IDENTITY.credential_service;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthStorageNamespace {
+    /// Stock Codex direct-keyring and encrypted-file names.
+    Codex,
+    /// Moedex-owned direct-keyring and encrypted-file names.
+    Moedex,
+}
+
+impl AuthStorageNamespace {
+    fn keyring_service(self) -> &'static str {
+        match self {
+            Self::Codex => CODEX_KEYRING_SERVICE,
+            Self::Moedex => codex_product_identity::PRODUCT_IDENTITY.credential_service,
+        }
+    }
+
+    fn local_secrets_namespace(self) -> LocalSecretsNamespace {
+        match self {
+            Self::Codex => LocalSecretsNamespace::CodexAuth,
+            Self::Moedex => LocalSecretsNamespace::MoedexAuth,
+        }
+    }
+}
+
 // turns codex_home path into a stable, short key string
-fn compute_store_key(codex_home: &Path) -> std::io::Result<String> {
+pub(super) fn compute_store_key(codex_home: &Path) -> std::io::Result<String> {
     let canonical = codex_home
         .canonicalize()
         .unwrap_or_else(|_| codex_home.to_path_buf());
@@ -252,18 +309,32 @@ fn compute_store_key(codex_home: &Path) -> std::io::Result<String> {
 struct DirectKeyringAuthStorage {
     codex_home: PathBuf,
     keyring_store: Arc<dyn KeyringStore>,
+    namespace: AuthStorageNamespace,
 }
 
 impl DirectKeyringAuthStorage {
+    #[cfg(test)]
     fn new(codex_home: PathBuf, keyring_store: Arc<dyn KeyringStore>) -> Self {
+        Self::new_in_namespace(codex_home, keyring_store, AuthStorageNamespace::Moedex)
+    }
+
+    fn new_in_namespace(
+        codex_home: PathBuf,
+        keyring_store: Arc<dyn KeyringStore>,
+        namespace: AuthStorageNamespace,
+    ) -> Self {
         Self {
             codex_home,
             keyring_store,
+            namespace,
         }
     }
 
     fn load_from_keyring(&self, key: &str) -> std::io::Result<Option<AuthDotJson>> {
-        match self.keyring_store.load(KEYRING_SERVICE, key) {
+        match self
+            .keyring_store
+            .load(self.namespace.keyring_service(), key)
+        {
             Ok(Some(serialized)) => serde_json::from_str(&serialized).map(Some).map_err(|err| {
                 std::io::Error::other(format!(
                     "failed to deserialize CLI auth from keyring: {err}"
@@ -278,7 +349,10 @@ impl DirectKeyringAuthStorage {
     }
 
     fn save_to_keyring(&self, key: &str, value: &str) -> std::io::Result<()> {
-        match self.keyring_store.save(KEYRING_SERVICE, key, value) {
+        match self
+            .keyring_store
+            .save(self.namespace.keyring_service(), key, value)
+        {
             Ok(()) => Ok(()),
             Err(error) => {
                 let message = format!(
@@ -313,7 +387,7 @@ impl AuthStorageBackend for DirectKeyringAuthStorage {
         let key = compute_store_key(&self.codex_home)?;
         let keyring_removed = self
             .keyring_store
-            .delete(KEYRING_SERVICE, &key)
+            .delete(self.namespace.keyring_service(), &key)
             .map_err(|err| {
                 std::io::Error::other(format!("failed to delete auth from keyring: {err}"))
             })?;
@@ -338,14 +412,26 @@ impl Debug for SecretsKeyringAuthStorage {
 }
 
 impl SecretsKeyringAuthStorage {
+    #[cfg(test)]
     fn new(codex_home: PathBuf, keyring_store: Arc<dyn KeyringStore>) -> Self {
-        let direct_storage =
-            DirectKeyringAuthStorage::new(codex_home.clone(), Arc::clone(&keyring_store));
+        Self::new_in_namespace(codex_home, keyring_store, AuthStorageNamespace::Moedex)
+    }
+
+    fn new_in_namespace(
+        codex_home: PathBuf,
+        keyring_store: Arc<dyn KeyringStore>,
+        namespace: AuthStorageNamespace,
+    ) -> Self {
+        let direct_storage = DirectKeyringAuthStorage::new_in_namespace(
+            codex_home.clone(),
+            Arc::clone(&keyring_store),
+            namespace,
+        );
         let secrets_manager = SecretsManager::new_with_keyring_store_and_namespace(
             codex_home.clone(),
             SecretsBackendKind::Local,
             keyring_store,
-            LocalSecretsNamespace::MoedexAuth,
+            namespace.local_secrets_namespace(),
         );
         Self {
             codex_home,
@@ -412,6 +498,7 @@ struct AutoAuthStorage {
 }
 
 impl AutoAuthStorage {
+    #[cfg(test)]
     fn new(
         codex_home: PathBuf,
         keyring_store: Arc<dyn KeyringStore>,
@@ -437,6 +524,13 @@ impl AuthStorageBackend for AutoAuthStorage {
                 warn!("failed to load CLI auth from keyring, falling back to file storage: {err}");
                 self.file_storage.load()
             }
+        }
+    }
+
+    fn load_for_import(&self) -> std::io::Result<Option<AuthDotJson>> {
+        match self.keyring_storage.load()? {
+            Some(auth) => Ok(Some(auth)),
+            None => self.file_storage.load(),
         }
     }
 
@@ -552,32 +646,77 @@ fn create_auth_storage_with_store(
     keyring_store: Arc<dyn KeyringStore>,
     keyring_backend_kind: AuthKeyringBackendKind,
 ) -> Arc<dyn AuthStorageBackend> {
+    create_auth_storage_with_store_and_namespace(
+        codex_home,
+        mode,
+        keyring_store,
+        keyring_backend_kind,
+        AuthStorageNamespace::Moedex,
+    )
+}
+
+pub(super) fn create_auth_storage_with_store_and_namespace(
+    codex_home: PathBuf,
+    mode: AuthCredentialsStoreMode,
+    keyring_store: Arc<dyn KeyringStore>,
+    keyring_backend_kind: AuthKeyringBackendKind,
+    namespace: AuthStorageNamespace,
+) -> Arc<dyn AuthStorageBackend> {
     match mode {
         AuthCredentialsStoreMode::File => Arc::new(FileAuthStorage::new(codex_home)),
-        AuthCredentialsStoreMode::Keyring => {
-            create_keyring_auth_storage(codex_home, keyring_store, keyring_backend_kind)
-        }
-        AuthCredentialsStoreMode::Auto => Arc::new(AutoAuthStorage::new(
+        AuthCredentialsStoreMode::Keyring => create_keyring_auth_storage_in_namespace(
             codex_home,
             keyring_store,
             keyring_backend_kind,
-        )),
+            namespace,
+        ),
+        AuthCredentialsStoreMode::Auto => {
+            let keyring_storage = create_keyring_auth_storage_in_namespace(
+                codex_home.clone(),
+                keyring_store,
+                keyring_backend_kind,
+                namespace,
+            );
+            Arc::new(AutoAuthStorage {
+                keyring_storage,
+                file_storage: Arc::new(FileAuthStorage::new(codex_home)),
+            })
+        }
         AuthCredentialsStoreMode::Ephemeral => Arc::new(EphemeralAuthStorage::new(codex_home)),
     }
 }
 
+#[cfg(test)]
 fn create_keyring_auth_storage(
     codex_home: PathBuf,
     keyring_store: Arc<dyn KeyringStore>,
     keyring_backend_kind: AuthKeyringBackendKind,
 ) -> Arc<dyn AuthStorageBackend> {
+    create_keyring_auth_storage_in_namespace(
+        codex_home,
+        keyring_store,
+        keyring_backend_kind,
+        AuthStorageNamespace::Moedex,
+    )
+}
+
+fn create_keyring_auth_storage_in_namespace(
+    codex_home: PathBuf,
+    keyring_store: Arc<dyn KeyringStore>,
+    keyring_backend_kind: AuthKeyringBackendKind,
+    namespace: AuthStorageNamespace,
+) -> Arc<dyn AuthStorageBackend> {
     match keyring_backend_kind {
-        AuthKeyringBackendKind::Direct => {
-            Arc::new(DirectKeyringAuthStorage::new(codex_home, keyring_store))
-        }
-        AuthKeyringBackendKind::Secrets => {
-            Arc::new(SecretsKeyringAuthStorage::new(codex_home, keyring_store))
-        }
+        AuthKeyringBackendKind::Direct => Arc::new(DirectKeyringAuthStorage::new_in_namespace(
+            codex_home,
+            keyring_store,
+            namespace,
+        )),
+        AuthKeyringBackendKind::Secrets => Arc::new(SecretsKeyringAuthStorage::new_in_namespace(
+            codex_home,
+            keyring_store,
+            namespace,
+        )),
     }
 }
 
