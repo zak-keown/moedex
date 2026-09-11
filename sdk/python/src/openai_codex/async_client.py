@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from ._goal import _GoalOperationState
 from ._message_router import _TurnSubscription
-from .client import CodexClient, CodexConfig
+from .client import ApprovalHandler, CodexClient, CodexConfig
 from .generated.v2_all import (
     AccountLoginCompletedNotification,
     AgentMessageDeltaNotification,
@@ -57,9 +57,13 @@ _TURN_START_EXECUTOR = ThreadPoolExecutor(thread_name_prefix="codex-turn-start")
 class AsyncCodexClient:
     """Async wrapper around CodexClient using thread offloading."""
 
-    def __init__(self, config: CodexConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: CodexConfig | None = None,
+        approval_handler: ApprovalHandler | None = None,
+    ) -> None:
         """Create the wrapped sync client that owns the transport process."""
-        self._sync = CodexClient(config=config)
+        self._sync = CodexClient(config=config, approval_handler=approval_handler)
 
     async def __aenter__(self) -> "AsyncCodexClient":
         """Start the Codex process when entering an async context."""

@@ -309,7 +309,13 @@ const childResult = await new Promise((resolve) => {
 
 if (childResult.type === "signal") {
   // Re-emit the same signal so that the parent terminates with the expected
-  // semantics (this also sets the correct exit code of 128 + n).
+  // semantics (this also sets the correct exit code of 128 + n). The signal
+  // listeners registered above suppress Node's default disposition, so
+  // `process.kill(self, signal)` on a still-listened signal would only invoke
+  // the (now no-op) handler and leave the process to fall off the end and exit
+  // 0. Remove the listener first so the OS default disposition actually
+  // terminates the parent with 128 + n.
+  process.removeAllListeners(childResult.signal);
   process.kill(process.pid, childResult.signal);
 } else {
   process.exit(childResult.exitCode);

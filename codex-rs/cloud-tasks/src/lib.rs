@@ -1036,16 +1036,19 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                         }
                         // (removed TaskSummaryUpdated; unused in this prototype)
                         app::AppEvent::ApplyPreflightFinished { id, title, message, level, skipped, conflicts } => {
-                            // Only update if modal is still open and ids match
-                            if let Some(m) = app.apply_modal.as_mut()
-                                && m.task_id == id
+                            // Clear the in-flight guard unconditionally: the job
+                            // has finished even if the user dismissed the modal
+                            // mid-run. Only update the modal UI if it is still
+                            // open for this task.
+                            let modal_open_for_id = app.on_apply_preflight_finished(&id);
+                            if modal_open_for_id
+                                && let Some(m) = app.apply_modal.as_mut()
                             {
                                     m.title = title;
                                     m.result_message = Some(message);
                                     m.result_level = Some(level);
                                     m.skipped_paths = skipped;
                                     m.conflict_paths = conflicts;
-                                    app.apply_preflight_inflight = false;
                                     needs_redraw = true;
                                     let _ = frame_tx.send(Instant::now());
                             }
@@ -1297,13 +1300,13 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                             needs_redraw = true;
                         }
                         app::AppEvent::ApplyFinished { id, result } => {
-                            // Only update if the modal still corresponds to this id.
-                            if let Some(m) = &app.apply_modal {
-                                if m.task_id != id { continue; }
-                            } else {
+                            // Clear the in-flight guard unconditionally: the job
+                            // has finished even if the user dismissed the modal
+                            // mid-run. Only render the outcome if the modal is
+                            // still open for this task.
+                            if !app.on_apply_finished(&id) {
                                 continue;
                             }
-                            app.apply_inflight = false;
                             match result {
                                 Ok(outcome) => {
                                     app.status = outcome.message.clone();

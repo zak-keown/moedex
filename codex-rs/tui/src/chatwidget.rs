@@ -606,7 +606,10 @@ pub(crate) struct ChatWidget {
     refreshing_status_outputs: Vec<(u64, StatusHistoryHandle)>,
     next_status_refresh_request_id: u64,
     refreshing_token_activity_output: Option<tokens::PendingTokenActivityOutput>,
-    completed_token_activity_output: Option<history_cell::CompositeHistoryCell>,
+    // FIFO queue of completed-but-not-yet-inserted `/usage` cards. A queue (not a
+    // single slot) so starting another `/usage` while one is still waiting for the
+    // insertion barrier to clear does not silently drop the earlier card.
+    completed_token_activity_output: Vec<history_cell::CompositeHistoryCell>,
     next_token_activity_request_id: u64,
     pending_rate_limit_reset_request_id: Option<u64>,
     pending_rate_limit_reset_idempotency_key: Option<String>,

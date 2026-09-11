@@ -80,7 +80,9 @@ pub(super) fn clone_git_source(
             )?;
             ensure_git_success(&output, "git checkout marketplace ref")?;
         }
-        return git_worktree_revision(&git_destination, timeout, mode);
+        let revision = git_worktree_revision(&git_destination, timeout, mode)?;
+        verify_pinned_sha(ref_name, &revision)?;
+        return Ok(revision);
     }
 
     let output = run_git_command_with_timeout(
@@ -119,7 +121,28 @@ pub(super) fn clone_git_source(
         timeout,
     )?;
     ensure_git_success(&output, "git checkout marketplace ref")?;
-    git_worktree_revision(&git_destination, timeout, mode)
+    let revision = git_worktree_revision(&git_destination, timeout, mode)?;
+    verify_pinned_sha(ref_name, &revision)?;
+    Ok(revision)
+}
+
+/// When `ref_name` is a full 40-hex SHA (an immutable commit pin), require the
+/// actually-checked-out revision to match it. `git checkout <name>` resolves a
+/// branch/tag named exactly like the SHA in preference to the raw object, so a
+/// remote that later grows such a ref could silently substitute a different
+/// tree; `git_remote_revision` already treats a full SHA as pre-resolved and
+/// skips `ls-remote`, so this is the codebase's signal that the value is a pin.
+/// Mirrors `loader::clone_git_plugin_source`'s post-checkout verification.
+fn verify_pinned_sha(ref_name: Option<&str>, checked_out: &str) -> Result<(), String> {
+    if let Some(ref_name) = ref_name
+        && is_full_git_sha(ref_name)
+        && !checked_out.eq_ignore_ascii_case(ref_name)
+    {
+        return Err(format!(
+            "checked out Git SHA {checked_out} does not match requested SHA {ref_name}"
+        ));
+    }
+    Ok(())
 }
 
 fn git_worktree_revision(
@@ -251,6 +274,64 @@ mod tests {
         assert!(is_full_git_sha("0123456789abcdef0123456789abcdef01234567"));
         assert!(!is_full_git_sha("main"));
         assert!(!is_full_git_sha("0123456"));
+    }
+
+    #[test]
+    fn clone_git_source_rejects_sha_that_resolves_to_hostile_branch() {
+        use super::clone_git_source;
+        use crate::PluginGitMode;
+        use std::process::Command;
+        use std::time::Duration;
+
+        fn git(args: &[&str], cwd: &std::path::Path) -> String {
+            let out = Command::new("git")
+                .args(["-c", codex_git_utils::SAFE_BARE_REPOSITORY_CONFIG])
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .expect("run git");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+
+        let codex_home = tempfile::tempdir().expect("codex home");
+        let repo = tempfile::tempdir().expect("repo");
+        git(&["init"], repo.path());
+        git(&["config", "user.email", "test@example.com"], repo.path());
+        git(&["config", "user.name", "Test User"], repo.path());
+        std::fs::write(repo.path().join("marker.txt"), "benign").unwrap();
+        git(&["add", "."], repo.path());
+        git(&["commit", "-m", "benign"], repo.path());
+        let benign_sha = git(&["rev-parse", "HEAD"], repo.path());
+        std::fs::write(repo.path().join("marker.txt"), "malicious").unwrap();
+        git(&["add", "."], repo.path());
+        git(&["commit", "-m", "malicious"], repo.path());
+        let malicious_sha = git(&["rev-parse", "HEAD"], repo.path());
+        // Name the (malicious) default branch exactly like the benign commit's SHA.
+        git(&["branch", "-m", &benign_sha], repo.path());
+
+        let destination = codex_home.path().join("clone");
+        let err = clone_git_source(
+            codex_home.path(),
+            &repo.path().display().to_string(),
+            Some(&benign_sha),
+            &[],
+            &destination,
+            Duration::from_secs(60),
+            PluginGitMode::Manual,
+        )
+        .expect_err("a branch named like the SHA must not satisfy the pin");
+
+        assert_eq!(
+            err,
+            format!(
+                "checked out Git SHA {malicious_sha} does not match requested SHA {benign_sha}"
+            )
+        );
     }
 
     #[test]

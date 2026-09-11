@@ -958,7 +958,10 @@ pub unsafe fn revoke_ace(path: &Path, psid: *mut c_void) {
 pub unsafe fn allow_null_device(psid: *mut c_void) {
     let desired = 0x00020000 | 0x00040000; // READ_CONTROL | WRITE_DAC
     let h = CreateFileW(
-        to_wide(r"\\\\.\\NUL").as_ptr(),
+        // Canonical Win32 device path for the null device is `\\.\NUL`. The
+        // previous `r"\\\\.\\NUL"` was a raw literal (no escape processing), so
+        // it produced `\\\\.\\NUL` (10 bytes) instead of `\\.\NUL` (7 bytes).
+        to_wide(r"\\.\NUL").as_ptr(),
         desired,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
         std::ptr::null_mut(),

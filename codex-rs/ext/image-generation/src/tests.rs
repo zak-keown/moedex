@@ -353,3 +353,69 @@ fn function_payload() -> ToolPayload {
         arguments: "{}".to_string(),
     }
 }
+
+#[tokio::test]
+async fn backend_builds_route_aware_client_for_non_default_proxy_policy() {
+    use codex_http_client::HttpClientFactory;
+    use codex_http_client::OutboundProxyPolicy;
+    use codex_login::AuthHeaders;
+    use codex_login::AuthManager;
+    use codex_login::CodexAuth;
+    use codex_model_provider::create_model_provider;
+    use codex_model_provider_info::ModelProviderInfo;
+    use http::HeaderMap;
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
+    // With a non-default OutboundProxyPolicy the backend must build its client
+    // through the route-aware factory path (create_client_for_route_async), not
+    // the policy-bypassing create_client(). No proxy is configured, so the route
+    // resolves to Direct and the request reaches the destination — exercising
+    // the route-aware build path end to end. (Distinguishing honoring vs
+    // bypassing a *system/PAC* proxy needs OS-level proxy config and is not
+    // unit-testable; env proxies are honored by both paths.)
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/images/generations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "created": 1,
+            "data": [{"b64_json": "aGVsbG8=", "generation_id": "gen-1"}]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let auth_manager =
+        AuthManager::from_auth_for_testing(CodexAuth::Headers(AuthHeaders::new(HeaderMap::new())));
+    let backend = crate::backend::CodexImagesBackend::new(
+        create_model_provider(
+            ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri()))),
+            Some(auth_manager),
+        ),
+        None,
+        HttpClientFactory::new(OutboundProxyPolicy::RespectSystemProxy),
+    );
+
+    let result = backend
+        .generate(
+            ImageGenerationRequest {
+                prompt: "a cat".to_string(),
+                background: None,
+                model: "gpt-image-2".to_string(),
+                n: None,
+                quality: None,
+                size: None,
+            },
+            "turn-1",
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "route-aware image request should succeed: {:?}",
+        result.err().map(|error| error.message().to_string())
+    );
+}

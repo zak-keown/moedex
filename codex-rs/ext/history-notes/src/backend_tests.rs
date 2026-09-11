@@ -1,3 +1,5 @@
+use codex_http_client::HttpClientFactory;
+use codex_http_client::OutboundProxyPolicy;
 use codex_login::AuthHeaders;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
@@ -43,7 +45,10 @@ async fn routes_through_codex_backend_and_injects_trusted_session_agent_context(
         ))),
         Some(auth_manager),
     );
-    let backend = HistoryNotesBackend::new(provider);
+    let backend = HistoryNotesBackend::new(
+        provider,
+        HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+    );
 
     let response = backend
         .call(
@@ -116,13 +121,16 @@ async fn marks_encrypted_history_and_notes_arguments_without_changing_the_json_b
 
     let auth_manager =
         AuthManager::from_auth_for_testing(CodexAuth::Headers(AuthHeaders::new(HeaderMap::new())));
-    let backend = HistoryNotesBackend::new(create_model_provider(
-        ModelProviderInfo::create_openai_provider(Some(format!(
-            "{}/backend-api/codex",
-            server.uri()
-        ))),
-        Some(auth_manager),
-    ));
+    let backend = HistoryNotesBackend::new(
+        create_model_provider(
+            ModelProviderInfo::create_openai_provider(Some(format!(
+                "{}/backend-api/codex",
+                server.uri()
+            ))),
+            Some(auth_manager),
+        ),
+        HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+    );
 
     for (route, arguments) in cases {
         backend
@@ -136,4 +144,48 @@ async fn marks_encrypted_history_and_notes_arguments_without_changing_the_json_b
             .await
             .expect("encrypted argument request should succeed");
     }
+}
+
+#[tokio::test]
+async fn builds_route_aware_client_for_non_default_proxy_policy() {
+    // With a non-default OutboundProxyPolicy the backend must build its client
+    // through the route-aware factory path (create_client_for_route_async), not
+    // the policy-bypassing create_client(). No proxy is configured here, so the
+    // route resolves to Direct and the request reaches the destination — this
+    // exercises the route-aware build path end to end and guards against the
+    // plumbing regressing. (A test that distinguishes honoring vs bypassing a
+    // *system/PAC* proxy needs OS-level proxy configuration and is not possible
+    // in a unit test; env proxies are honored by both paths.)
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/backend-api/codex/alpha/notes/v2/read_file"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let auth_manager =
+        AuthManager::from_auth_for_testing(CodexAuth::Headers(AuthHeaders::new(HeaderMap::new())));
+    let backend = HistoryNotesBackend::new(
+        create_model_provider(
+            ModelProviderInfo::create_openai_provider(Some(format!(
+                "{}/backend-api/codex",
+                server.uri()
+            ))),
+            Some(auth_manager),
+        ),
+        HttpClientFactory::new(OutboundProxyPolicy::RespectSystemProxy),
+    );
+
+    let response = backend
+        .call(
+            "alpha/notes/v2/read_file",
+            "session-1",
+            "/root",
+            json!({}),
+            TruncationPolicy::Bytes(1024),
+        )
+        .await
+        .expect("route-aware request should succeed");
+    assert_eq!(response, json!({"ok": true}));
 }

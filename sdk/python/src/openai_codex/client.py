@@ -831,7 +831,14 @@ class CodexClient:
         return input_items
 
     def _default_approval_handler(self, method: str, params: JsonObject | None) -> JsonObject:
-        """Accept approval requests when the caller did not provide a handler."""
+        """Fallback approval handler used when the caller supplies none.
+
+        WARNING: this default **accepts every** escalated command-execution and
+        file-change approval request. It exists so the client does not deadlock
+        when the runtime escalates an approval back to it, but it provides no
+        gating. To observe, log, or deny these requests, pass an
+        ``approval_handler`` to ``Codex``/``AsyncCodex`` (or ``CodexClient``).
+        """
         if method == "item/commandExecution/requestApproval":
             return {"decision": "accept"}
         if method == "item/fileChange/requestApproval":

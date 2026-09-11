@@ -4,8 +4,10 @@ use codex_api::ImageResponse;
 use codex_api::ImagesClient;
 use codex_api::ReqwestTransport;
 use codex_api::map_api_error;
+use codex_http_client::ClientRouteClass;
+use codex_http_client::HttpClientFactory;
 use codex_login::default_client::add_originator_header;
-use codex_login::default_client::create_client;
+use codex_login::default_client::create_client_for_route_async;
 use codex_model_provider::SharedModelProvider;
 use codex_protocol::error::CodexErr;
 use http::HeaderMap;
@@ -47,14 +49,20 @@ impl ImageBackendError {
 pub(crate) struct CodexImagesBackend {
     provider: SharedModelProvider,
     originator: Option<String>,
+    http_client_factory: HttpClientFactory,
 }
 
 impl CodexImagesBackend {
     /// Creates a backend that sends image requests through the active model provider.
-    pub(crate) fn new(provider: SharedModelProvider, originator: Option<String>) -> Self {
+    pub(crate) fn new(
+        provider: SharedModelProvider,
+        originator: Option<String>,
+        http_client_factory: HttpClientFactory,
+    ) -> Self {
         Self {
             provider,
             originator,
+            http_client_factory,
         }
     }
 
@@ -70,8 +78,19 @@ impl CodexImagesBackend {
             .api_auth()
             .await
             .map_err(|err| ImageBackendError::from_message(err.to_string()))?;
+        // Build the client through the configured HttpClientFactory so a
+        // non-default OutboundProxyPolicy (enterprise proxy / custom-CA policy)
+        // is honored for image-generation traffic, instead of the plain
+        // create_client() path that bypasses it. Mirrors guardian-v2's sampler.
+        let http_client = create_client_for_route_async(
+            self.http_client_factory.clone(),
+            provider.base_url.clone(),
+            ClientRouteClass::Api,
+        )
+        .await
+        .map_err(|err| ImageBackendError::from_message(err.to_string()))?;
         Ok(ImagesClient::new(
-            ReqwestTransport::from_http_client(create_client()),
+            ReqwestTransport::from_http_client(http_client),
             provider,
             auth,
         ))

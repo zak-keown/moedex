@@ -37,7 +37,7 @@ from .api import (
     TurnHandle,
     TurnResult,
 )
-from .client import CodexConfig
+from .client import ApprovalHandler, CodexConfig
 from .errors import (
     CodexError,
     CodexRpcError,
@@ -59,6 +59,7 @@ __all__ = [
     "CodexConfig",
     "Codex",
     "AsyncCodex",
+    "ApprovalHandler",
     "ApprovalMode",
     "Sandbox",
     "ChatgptLoginHandle",

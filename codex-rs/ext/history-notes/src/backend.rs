@@ -3,7 +3,9 @@ use std::time::Duration;
 use codex_api::ReqwestTransport;
 use codex_client::HttpTransport;
 use codex_client::RequestBody;
-use codex_login::default_client::create_client;
+use codex_http_client::ClientRouteClass;
+use codex_http_client::HttpClientFactory;
+use codex_login::default_client::create_client_for_route_async;
 use codex_model_provider::SharedModelProvider;
 use codex_utils_output_truncation::TruncationPolicy;
 use http::HeaderValue;
@@ -19,11 +21,18 @@ const OPERATION_ERROR_PREFIX: &str = "Unable to perform operation:";
 #[derive(Clone)]
 pub(crate) struct HistoryNotesBackend {
     provider: SharedModelProvider,
+    http_client_factory: HttpClientFactory,
 }
 
 impl HistoryNotesBackend {
-    pub(crate) fn new(provider: SharedModelProvider) -> Self {
-        Self { provider }
+    pub(crate) fn new(
+        provider: SharedModelProvider,
+        http_client_factory: HttpClientFactory,
+    ) -> Self {
+        Self {
+            provider,
+            http_client_factory,
+        }
     }
 
     pub(crate) async fn call(
@@ -82,7 +91,18 @@ impl HistoryNotesBackend {
         let request = auth.apply_auth(request).await.map_err(|_| {
             format!("{OPERATION_ERROR_PREFIX} Could not apply backend authentication.")
         })?;
-        let response = ReqwestTransport::from_http_client(create_client())
+        // Build the client through the configured HttpClientFactory so a
+        // non-default OutboundProxyPolicy (e.g. an enterprise proxy / custom-CA
+        // policy) is honored for history/notes traffic, instead of the plain
+        // create_client() path that bypasses it. Mirrors guardian-v2's sampler.
+        let http_client = create_client_for_route_async(
+            self.http_client_factory.clone(),
+            request.url.clone(),
+            ClientRouteClass::Api,
+        )
+        .await
+        .map_err(|_| format!("{OPERATION_ERROR_PREFIX} The backend client could not be built."))?;
+        let response = ReqwestTransport::from_http_client(http_client)
             .execute(request)
             .await
             .map_err(|_| format!("{OPERATION_ERROR_PREFIX} The backend request failed."))?;

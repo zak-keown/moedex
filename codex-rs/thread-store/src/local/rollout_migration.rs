@@ -1240,8 +1240,24 @@ async fn read_rollout_record(
         }));
     }
     // Legacy records do not have ordinals, so malformed complete records cannot be repaired.
-    // Skip them and let the next newline-delimited record resynchronize the stream.
-    let line = line_parser::parse_legacy_rollout_line(bytes).unwrap_or(None);
+    // A record that is not valid JSON (corruption, a truncated tail) is skipped so the next
+    // newline-delimited record can resynchronize the stream. But a record that IS valid JSON
+    // and merely failed to convert (an unrecognized event type, an un-normalizable shape) is
+    // real content: collapsing that `Err` into a skip the way `Ok(None)` (a blank or
+    // deliberately retired record) is handled would drop it silently and still report the
+    // migration as successful — permanent, invisible data loss. Fail instead so the caller
+    // aborts this thread's migration and leaves the original legacy rollout in place.
+    let line = match line_parser::parse_legacy_rollout_line(bytes) {
+        Ok(line) => line,
+        Err(error) => {
+            if serde_json::from_slice::<serde_json::Value>(bytes).is_ok() {
+                return Err(migration_error(format!(
+                    "failed to convert a legacy rollout record: {error}"
+                )));
+            }
+            None
+        }
+    };
     Ok(Some(RolloutRecord {
         line,
         byte_count: byte_count as u64,

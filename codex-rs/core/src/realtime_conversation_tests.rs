@@ -355,3 +355,32 @@ fn realtime_headers_include_only_non_default_originator() {
         );
     }
 }
+
+#[test]
+fn realtime_text_input_log_omits_content() {
+    let buffer: &'static std::sync::Mutex<Vec<u8>> =
+        Box::leak(Box::new(std::sync::Mutex::new(Vec::new())));
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(tracing_test::internal::MockWriter::new(buffer))
+        .finish();
+    let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+
+    super::log_realtime_text_input("swordfish hunter2 secret");
+
+    let logs = String::from_utf8(
+        buffer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone(),
+    )
+    .expect("realtime text log should be valid utf-8");
+    // The breadcrumb and length are logged; the user's text content is not.
+    assert!(logs.contains("appending realtime conversation text input"));
+    assert!(logs.contains("text_len=24"));
+    assert!(
+        !logs.contains("swordfish hunter2 secret"),
+        "realtime user text content must not be logged: {logs}"
+    );
+}

@@ -67,6 +67,14 @@ const USERPROFILE_ROOT_EXCLUSIONS: &[&str] = &[
     ".npm",
     ".pki",
     ".terraform.d",
+    // Credential *files* that live directly at %USERPROFILE%. Matching is by
+    // exact top-level entry name, so the `.npm` directory entry above does not
+    // cover the `.npmrc` file; these must be listed explicitly.
+    ".npmrc",
+    ".netrc",
+    "_netrc",
+    ".pypirc",
+    ".git-credentials",
 ];
 const WINDOWS_PLATFORM_DEFAULT_READ_ROOTS: &[&str] = &[
     r"C:\Windows",

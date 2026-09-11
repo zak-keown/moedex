@@ -42,7 +42,7 @@ from ._run import (
 )
 from ._sandbox import Sandbox as Sandbox, _sandbox_mode, _sandbox_policy
 from .async_client import AsyncCodexClient
-from .client import CodexClient, CodexConfig
+from .client import ApprovalHandler, CodexClient, CodexConfig
 from .generated.v2_all import (
     ApiKeyLoginAccountParams,
     GetAccountParams,
@@ -82,8 +82,12 @@ class Codex:
     context manager so resources are closed promptly.
     """
 
-    def __init__(self, config: CodexConfig | None = None) -> None:
-        self._client = CodexClient(config=config)
+    def __init__(
+        self,
+        config: CodexConfig | None = None,
+        approval_handler: ApprovalHandler | None = None,
+    ) -> None:
+        self._client = CodexClient(config=config, approval_handler=approval_handler)
         try:
             self._client.start()
             self._init = validate_initialize_metadata(self._client.initialize())
@@ -309,8 +313,12 @@ class AsyncCodex:
     or first awaited API use.
     """
 
-    def __init__(self, config: CodexConfig | None = None) -> None:
-        self._client = AsyncCodexClient(config=config)
+    def __init__(
+        self,
+        config: CodexConfig | None = None,
+        approval_handler: ApprovalHandler | None = None,
+    ) -> None:
+        self._client = AsyncCodexClient(config=config, approval_handler=approval_handler)
         self._init: InitializeResponse | None = None
         self._initialized = False
         self._init_lock = asyncio.Lock()

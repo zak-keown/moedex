@@ -678,6 +678,144 @@ fn install_with_new_version_keeps_existing_plugin_root_and_prunes_old_versions()
 }
 
 #[test]
+fn install_new_numbered_version_preserves_marked_local_override() {
+    // A remote sync that installs a *new* numbered release takes the
+    // rename-then-`remove_old_plugin_versions` branch. That prune must not delete a
+    // `local` override that carries the protection marker (CR-002).
+    let tmp = tempdir().unwrap();
+    let store = PluginStore::new(tmp.path().to_path_buf());
+    let plugin_id = PluginId::new("sample-plugin".to_string(), "debug".to_string()).unwrap();
+
+    write_plugin(tmp.path(), "local-src", "sample-plugin");
+    store
+        .install_with_version(
+            AbsolutePathBuf::try_from(tmp.path().join("local-src")).unwrap(),
+            plugin_id.clone(),
+            DEFAULT_PLUGIN_VERSION.to_string(),
+        )
+        .unwrap();
+    // Protect the override and record a developer edit inside it.
+    let local_root = store.plugin_root(&plugin_id, DEFAULT_PLUGIN_VERSION);
+    fs::write(local_root.as_path().join(LOCAL_OVERRIDE_MARKER), "").unwrap();
+    let local_edit = local_root.as_path().join("LOCAL_EDIT");
+    fs::write(&local_edit, "dev work").unwrap();
+
+    write_plugin_with_version(tmp.path(), "v1", "sample-plugin", Some("1.0.0"));
+    store
+        .install_with_version(
+            AbsolutePathBuf::try_from(tmp.path().join("v1")).unwrap(),
+            plugin_id.clone(),
+            "1.0.0".to_string(),
+        )
+        .unwrap();
+
+    assert!(
+        local_root.as_path().is_dir(),
+        "marked local override was deleted by remote sync"
+    );
+    assert!(
+        local_edit.is_file(),
+        "developer's local edit was destroyed by remote sync"
+    );
+    assert!(
+        tmp.path()
+            .join("plugins/cache/debug/sample-plugin/1.0.0")
+            .is_dir(),
+        "the numbered release should still be installed"
+    );
+    assert_eq!(
+        store.active_plugin_version(&plugin_id),
+        Some(DEFAULT_PLUGIN_VERSION.to_string())
+    );
+}
+
+#[test]
+fn install_new_numbered_version_replaces_unmarked_local_placeholder() {
+    // Narrowness guard: without the marker, a version-less `local` install is an
+    // ordinary placeholder and is still upgraded to the numbered release.
+    let tmp = tempdir().unwrap();
+    let store = PluginStore::new(tmp.path().to_path_buf());
+    let plugin_id = PluginId::new("sample-plugin".to_string(), "debug".to_string()).unwrap();
+
+    write_plugin(tmp.path(), "local-src", "sample-plugin");
+    store
+        .install_with_version(
+            AbsolutePathBuf::try_from(tmp.path().join("local-src")).unwrap(),
+            plugin_id.clone(),
+            DEFAULT_PLUGIN_VERSION.to_string(),
+        )
+        .unwrap();
+
+    write_plugin_with_version(tmp.path(), "v1", "sample-plugin", Some("1.0.0"));
+    store
+        .install_with_version(
+            AbsolutePathBuf::try_from(tmp.path().join("v1")).unwrap(),
+            plugin_id.clone(),
+            "1.0.0".to_string(),
+        )
+        .unwrap();
+
+    assert!(
+        !store
+            .plugin_root(&plugin_id, DEFAULT_PLUGIN_VERSION)
+            .as_path()
+            .exists(),
+        "an unmarked local placeholder must still be replaced"
+    );
+    assert_eq!(
+        store.active_plugin_version(&plugin_id),
+        Some("1.0.0".to_string())
+    );
+}
+
+#[test]
+fn reinstall_existing_numbered_version_preserves_marked_local_override() {
+    // Re-syncing an already-cached release takes the wholesale target_root
+    // replacement branch, which discards every sibling version directory. A marked
+    // `local` override must still survive it (CR-002).
+    let tmp = tempdir().unwrap();
+    let store = PluginStore::new(tmp.path().to_path_buf());
+    let plugin_id = PluginId::new("sample-plugin".to_string(), "debug".to_string()).unwrap();
+
+    write_plugin(tmp.path(), "local-src", "sample-plugin");
+    store
+        .install_with_version(
+            AbsolutePathBuf::try_from(tmp.path().join("local-src")).unwrap(),
+            plugin_id.clone(),
+            DEFAULT_PLUGIN_VERSION.to_string(),
+        )
+        .unwrap();
+    let local_root = store.plugin_root(&plugin_id, DEFAULT_PLUGIN_VERSION);
+    fs::write(local_root.as_path().join(LOCAL_OVERRIDE_MARKER), "").unwrap();
+    let local_edit = local_root.as_path().join("LOCAL_EDIT");
+    fs::write(&local_edit, "dev work").unwrap();
+
+    write_plugin_with_version(tmp.path(), "v1", "sample-plugin", Some("1.0.0"));
+    for _ in 0..2 {
+        store
+            .install_with_version(
+                AbsolutePathBuf::try_from(tmp.path().join("v1")).unwrap(),
+                plugin_id.clone(),
+                "1.0.0".to_string(),
+            )
+            .unwrap();
+    }
+
+    assert!(
+        local_root.as_path().is_dir(),
+        "marked local override was deleted by wholesale cache replacement"
+    );
+    assert!(
+        local_edit.is_file(),
+        "developer's local edit was destroyed by wholesale cache replacement"
+    );
+    assert_eq!(
+        store.active_plugin_version(&plugin_id),
+        Some(DEFAULT_PLUGIN_VERSION.to_string())
+    );
+}
+
+#[test]
 fn old_plugin_version_would_stay_active_for_local_or_later_versions() {
     assert!(old_plugin_version_would_stay_active(
         DEFAULT_PLUGIN_VERSION,

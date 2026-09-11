@@ -1832,12 +1832,24 @@ fn realtime_request_headers(
     Ok(Some(headers))
 }
 
+/// Log that realtime user text was appended, WITHOUT its content. The text is
+/// exactly what the user typed/spoke and may contain credentials; `codex_core`
+/// logs are captured into the feedback ring buffer and log DB at TRACE by
+/// default, so only the length is recorded — mirroring the fanout task's rule
+/// ("Keep this receipt free of event payloads").
+fn log_realtime_text_input(text: &str) {
+    debug!(
+        text_len = text.len(),
+        "[realtime-text] appending realtime conversation text input"
+    );
+}
+
 pub(crate) async fn handle_text(
     sess: &Arc<Session>,
     sub_id: String,
     params: ConversationTextParams,
 ) {
-    debug!(text = %params.text, "[realtime-text] appending realtime conversation text input");
+    log_realtime_text_input(&params.text);
     if let Err(err) = sess.conversation.text_in(params).await {
         error!("failed to append realtime text: {err}");
         if sess.conversation.running_state().await.is_some() {

@@ -493,10 +493,15 @@ pub enum WorkspaceMessageType {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct AccountTokenUsageSummary {
+    #[ts(type = "number | null")]
     pub lifetime_tokens: Option<i64>,
+    #[ts(type = "number | null")]
     pub peak_daily_tokens: Option<i64>,
+    #[ts(type = "number | null")]
     pub longest_running_turn_sec: Option<i64>,
+    #[ts(type = "number | null")]
     pub current_streak_days: Option<i64>,
+    #[ts(type = "number | null")]
     pub longest_streak_days: Option<i64>,
 }
 
@@ -505,6 +510,7 @@ pub struct AccountTokenUsageSummary {
 #[ts(export_to = "v2/")]
 pub struct AccountTokenUsageDailyBucket {
     pub start_date: String,
+    #[ts(type = "number")]
     pub tokens: i64,
 }
 
@@ -747,4 +753,34 @@ pub struct AccountLoginCompletedNotification {
 #[ts(export_to = "v2/")]
 pub enum DesktopOnboardingEntrypoint {
     LifeSciences,
+}
+
+#[cfg(test)]
+mod token_usage_wire_type_tests {
+    use super::*;
+
+    // These `i64`/`Option<i64>` fields are serialized by serde_json as plain
+    // JSON numbers (no `#[serde(with = ...)]` stringification), and JSON.parse
+    // never produces a `bigint`. ts-rs defaults `i64` to `bigint`, which does
+    // not match the wire type, so these types must override to `number`,
+    // mirroring granted_at/expires_at/resets_at elsewhere in this file.
+    #[test]
+    fn account_token_usage_summary_uses_number_not_bigint() {
+        let decl = AccountTokenUsageSummary::decl();
+        assert!(
+            !decl.contains("bigint"),
+            "i64 fields serialize as JSON numbers; TS type must be number, got: {decl}"
+        );
+        assert!(decl.contains("number"), "expected `number` in: {decl}");
+    }
+
+    #[test]
+    fn account_token_usage_daily_bucket_uses_number_not_bigint() {
+        let decl = AccountTokenUsageDailyBucket::decl();
+        assert!(
+            !decl.contains("bigint"),
+            "i64 field serializes as a JSON number; TS type must be number, got: {decl}"
+        );
+        assert!(decl.contains("number"), "expected `number` in: {decl}");
+    }
 }

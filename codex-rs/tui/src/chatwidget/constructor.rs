@@ -141,7 +141,7 @@ impl ChatWidget {
             refreshing_status_outputs: Vec::new(),
             next_status_refresh_request_id: 0,
             refreshing_token_activity_output: None,
-            completed_token_activity_output: None,
+            completed_token_activity_output: Vec::new(),
             next_token_activity_request_id: 0,
             pending_rate_limit_reset_request_id: None,
             pending_rate_limit_reset_idempotency_key: None,

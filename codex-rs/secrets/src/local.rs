@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -110,6 +112,9 @@ impl LocalSecretsBackend {
     pub fn set(&self, scope: &SecretScope, name: &SecretName, value: &str) -> Result<()> {
         anyhow::ensure!(!value.is_empty(), "secret value must not be empty");
         let canonical_key = scope.canonical_key(name);
+        // Hold an exclusive lock across the whole load-modify-save cycle so a
+        // concurrent writer cannot read a stale snapshot and clobber this update.
+        let _write_lock = self.lock_for_write()?;
         let mut file = self.load_file()?;
         file.secrets.insert(canonical_key, value.to_string());
         self.save_file(&file)
@@ -123,6 +128,8 @@ impl LocalSecretsBackend {
 
     pub fn delete(&self, scope: &SecretScope, name: &SecretName) -> Result<bool> {
         let canonical_key = scope.canonical_key(name);
+        // See `set`: serialize the load-modify-save cycle against other writers.
+        let _write_lock = self.lock_for_write()?;
         let mut file = self.load_file()?;
         let removed = file.secrets.remove(&canonical_key).is_some();
         if removed {
@@ -153,14 +160,45 @@ impl LocalSecretsBackend {
         self.codex_home.join("secrets")
     }
 
-    fn secrets_path(&self) -> PathBuf {
-        let filename = match self.namespace {
+    fn secrets_filename(&self) -> &'static str {
+        match self.namespace {
             LocalSecretsNamespace::ManagedSecrets => LOCAL_SECRETS_FILENAME,
             LocalSecretsNamespace::CodexAuth => CODEX_AUTH_SECRETS_FILENAME,
             LocalSecretsNamespace::MoedexAuth => "moedex_auth.age",
             LocalSecretsNamespace::McpOAuth => MCP_OAUTH_SECRETS_FILENAME,
-        };
-        self.secrets_dir().join(filename)
+        }
+    }
+
+    fn secrets_path(&self) -> PathBuf {
+        self.secrets_dir().join(self.secrets_filename())
+    }
+
+    /// Acquires an exclusive, cross-process lock on a sidecar lock file next to
+    /// the secrets file. Callers hold the returned guard across the entire
+    /// load-modify-save cycle so two writers (two CLI/TUI/app-server processes,
+    /// or two tasks sharing this backend) serialize instead of racing and
+    /// silently dropping each other's change. Readers rely on the atomic
+    /// whole-file replace in `save_file` and need no lock. Mirrors the
+    /// cross-process locking used by `rollout`'s writer lock.
+    fn lock_for_write(&self) -> Result<File> {
+        let dir = self.secrets_dir();
+        fs::create_dir_all(&dir)
+            .with_context(|| format!("failed to create secrets dir {}", dir.display()))?;
+        let lock_path = dir.join(format!("{}.lock", self.secrets_filename()));
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .with_context(|| format!("failed to open secrets lock file {}", lock_path.display()))?;
+        lock_file.lock().with_context(|| {
+            format!(
+                "failed to acquire secrets write lock {}",
+                lock_path.display()
+            )
+        })?;
+        Ok(lock_file)
     }
 
     fn load_file(&self) -> Result<SecretsFile> {
@@ -507,11 +545,20 @@ mod tests {
             .collect::<std::io::Result<Vec<_>>>()
             .with_context(|| format!("failed to enumerate {}", secrets_dir.display()))?;
 
-        let filenames: Vec<String> = entries
+        let mut filenames: Vec<String> = entries
             .into_iter()
             .filter_map(|entry| entry.file_name().to_str().map(ToString::to_string))
             .collect();
-        assert_eq!(filenames, vec![LOCAL_SECRETS_FILENAME.to_string()]);
+        filenames.sort();
+        // Only the secrets file and its (persistent) write-lock sidecar remain;
+        // no atomic-write temp files are left behind.
+        assert_eq!(
+            filenames,
+            vec![
+                LOCAL_SECRETS_FILENAME.to_string(),
+                format!("{LOCAL_SECRETS_FILENAME}.lock"),
+            ]
+        );
         assert_eq!(backend.get(&scope, &name)?, Some("two".to_string()));
         assert!(
             MCP_OAUTH_CACHE
@@ -649,6 +696,52 @@ mod tests {
                 .is_none_or(|cached| cached.path != first.secrets_path())
         );
         assert_eq!(second.get(&scope, &name)?, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn concurrent_set_does_not_lose_updates() -> Result<()> {
+        let codex_home = tempfile::tempdir().expect("tempdir");
+        let keyring = Arc::new(MockKeyringStore::default());
+        let backend = Arc::new(LocalSecretsBackend::new(
+            codex_home.path().to_path_buf(),
+            keyring,
+        ));
+        let scope = SecretScope::Global;
+
+        // Seed the file (and the keyring passphrase) so the writers race only on
+        // the load-modify-save cycle, not on first-time key creation.
+        backend.set(&scope, &SecretName::new("SEED")?, "seed")?;
+
+        const WRITERS: usize = 16;
+        let barrier = Arc::new(std::sync::Barrier::new(WRITERS));
+        let handles: Vec<_> = (0..WRITERS)
+            .map(|i| {
+                let backend = Arc::clone(&backend);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let name = SecretName::new(&format!("KEY_{i}")).expect("valid name");
+                    barrier.wait();
+                    backend
+                        .set(&SecretScope::Global, &name, "value")
+                        .expect("concurrent set should succeed");
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().expect("writer thread should not panic");
+        }
+
+        // Every distinct key (SEED + one per writer) must survive; without a lock
+        // around load-modify-save, overlapping writers clobber each other and the
+        // file ends up with fewer keys than were written.
+        let entries = backend.list(Some(&scope))?;
+        assert_eq!(
+            entries.len(),
+            WRITERS + 1,
+            "concurrent writes lost updates: {entries:?}"
+        );
 
         Ok(())
     }

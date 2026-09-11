@@ -9,7 +9,10 @@ use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
 
 /// A minimal LRU cache protected by a Tokio mutex.
-/// Calls outside a Tokio runtime are no-ops.
+/// Calls outside a Tokio runtime — or from within a current-thread runtime —
+/// are no-ops. (The lock is taken via `block_in_place`, which panics on a
+/// current-thread runtime, so that case degrades to a no-op rather than
+/// crashing.)
 pub struct BlockingLruCache<K, V> {
     inner: Mutex<LruCache<K, V>>,
 }
@@ -123,7 +126,14 @@ fn lock_if_runtime<K, V>(m: &Mutex<LruCache<K, V>>) -> Option<MutexGuard<'_, Lru
 where
     K: Eq + Hash,
 {
-    tokio::runtime::Handle::try_current().ok()?;
+    let handle = tokio::runtime::Handle::try_current().ok()?;
+    // `Handle::try_current()` succeeds for any runtime flavor, but
+    // `block_in_place` below panics ("can call blocking only when running on the
+    // multi-threaded runtime") on a current-thread runtime. Treat that the same
+    // as "outside a runtime": a documented no-op, not a panic.
+    if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
+        return None;
+    }
     Some(tokio::task::block_in_place(|| m.blocking_lock()))
 }
 
@@ -167,6 +177,20 @@ mod tests {
         assert!(cache.get(&"b").is_none());
         assert_eq!(cache.get(&"a"), Some(1));
         assert_eq!(cache.get(&"c"), Some(3));
+    }
+
+    #[tokio::test] // default flavor is current_thread
+    async fn current_thread_runtime_is_noop_not_panic() {
+        let cache = BlockingLruCache::new(NonZeroUsize::new(2).expect("capacity"));
+
+        // Before the fix these calls panicked ("can call blocking only when
+        // running on the multi-threaded runtime") instead of degrading to the
+        // documented no-op. They must not panic on a current-thread runtime.
+        cache.insert("first", /*value*/ 1);
+        assert!(cache.get(&"first").is_none());
+        assert_eq!(cache.get_or_insert_with("first", || 2), 2);
+        assert!(cache.get(&"first").is_none());
+        assert!(cache.blocking_lock().is_none());
     }
 
     #[test]

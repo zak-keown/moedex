@@ -23,6 +23,12 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub const DEFAULT_PLUGIN_VERSION: &str = "local";
+/// A developer who has hand-modified a plugin's `local` override bundle can drop
+/// this marker file into the `local` version directory to protect it from being
+/// pruned or replaced by routine remote/curated cache syncs. Without the marker a
+/// version-less `local` install is treated as an ordinary placeholder and is still
+/// upgraded to a numbered release as usual.
+pub const LOCAL_OVERRIDE_MARKER: &str = ".codex-local-override";
 pub const PLUGINS_CACHE_DIR: &str = "plugins/cache";
 pub const PLUGINS_DATA_DIR: &str = "plugins/data";
 const AGENT_PLUGINS_DATA_DIR: &str = "agent-plugins";
@@ -733,6 +739,21 @@ fn replace_plugin_root_atomically(
                 }
             };
         }
+
+        // The wholesale replacement above discards every sibling version directory.
+        // Carry a protected `local` override forward from the backup so a routine sync
+        // does not silently destroy a developer's hand-modified bundle. A new `local`
+        // install (target already has one) wins, and an unmarked placeholder is not
+        // preserved.
+        let backup_local = backup_root.join(DEFAULT_PLUGIN_VERSION);
+        let target_local = target_root.join(DEFAULT_PLUGIN_VERSION);
+        if is_protected_local_override(DEFAULT_PLUGIN_VERSION, &backup_local)
+            && !target_local.exists()
+        {
+            fs::rename(&backup_local, &target_local).map_err(|err| {
+                PluginStoreError::io("failed to preserve local plugin override", err)
+            })?;
+        }
     } else {
         fs::rename(&staged_root, target_root)
             .map_err(|err| PluginStoreError::io("failed to activate plugin cache entry", err))?;
@@ -759,7 +780,10 @@ fn remove_old_plugin_versions(
         let Ok(version) = entry.file_name().into_string() else {
             continue;
         };
-        if version == plugin_version || validate_plugin_version_segment(&version).is_err() {
+        if version == plugin_version
+            || validate_plugin_version_segment(&version).is_err()
+            || is_protected_local_override(&version, &entry.path())
+        {
             continue;
         }
 
@@ -773,6 +797,13 @@ fn remove_old_plugin_versions(
     }
 
     Ok(())
+}
+
+/// A `local` version directory is a protected developer override when it carries
+/// [`LOCAL_OVERRIDE_MARKER`]. Such a directory must survive routine cache syncs,
+/// which would otherwise silently delete the developer's hand-modified bundle.
+fn is_protected_local_override(version: &str, version_root: &Path) -> bool {
+    version == DEFAULT_PLUGIN_VERSION && version_root.join(LOCAL_OVERRIDE_MARKER).is_file()
 }
 
 fn old_plugin_version_would_stay_active(old_version: &str, new_version: &str) -> bool {

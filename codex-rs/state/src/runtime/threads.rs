@@ -241,7 +241,11 @@ WITH RECURSIVE subtree(child_thread_id) AS (
     SELECT child_thread_id
     FROM thread_spawn_edges
     WHERE parent_thread_id = ?
-    UNION ALL
+    -- UNION (not UNION ALL) deduplicates (child, parent) rows so a cycle in
+    -- thread_spawn_edges terminates once no new nodes are produced, instead of
+    -- generating rows forever and hanging the query. upsert_thread_spawn_edge
+    -- can reparent a node under its own descendant, which closes such a cycle.
+    UNION
     SELECT edge.child_thread_id
     FROM thread_spawn_edges AS edge
     JOIN subtree ON edge.parent_thread_id = subtree.child_thread_id
@@ -288,10 +292,22 @@ LIMIT 2
         root_thread_id: ThreadId,
         status: Option<crate::DirectionalThreadSpawnEdgeStatus>,
     ) -> anyhow::Result<Vec<ThreadId>> {
+        // `path` accumulates every node visited on the way to the current row
+        // ("/root/child/..."). The recursive step refuses to follow an edge into
+        // a node already on that path, so a cycle in thread_spawn_edges (which
+        // upsert_thread_spawn_edge can create by reparenting a node under its own
+        // descendant) terminates instead of generating rows forever. `depth` and
+        // its BFS ordering, plus cross-path duplicates for DAGs, are preserved.
         let mut builder = QueryBuilder::<Sqlite>::new(
             r#"
-WITH RECURSIVE subtree(child_thread_id, depth) AS (
-    SELECT child_thread_id, 1
+WITH RECURSIVE subtree(child_thread_id, depth, path) AS (
+    SELECT child_thread_id, 1, '/' ||
+            "#,
+        );
+        builder.push_bind(root_thread_id.to_string());
+        builder.push(" || '/' || child_thread_id || '/'");
+        builder.push(
+            r#"
     FROM thread_spawn_edges
     WHERE parent_thread_id =
             "#,
@@ -303,10 +319,11 @@ WITH RECURSIVE subtree(child_thread_id, depth) AS (
             builder.push(
                 r#"
     UNION ALL
-    SELECT edge.child_thread_id, subtree.depth + 1
+    SELECT edge.child_thread_id, subtree.depth + 1, subtree.path || edge.child_thread_id || '/'
     FROM thread_spawn_edges AS edge
     JOIN subtree ON edge.parent_thread_id = subtree.child_thread_id
-    WHERE status =
+    WHERE instr(subtree.path, '/' || edge.child_thread_id || '/') = 0
+      AND edge.status =
                 "#,
             );
             builder.push_bind(status);
@@ -314,9 +331,10 @@ WITH RECURSIVE subtree(child_thread_id, depth) AS (
             builder.push(
                 r#"
     UNION ALL
-    SELECT edge.child_thread_id, subtree.depth + 1
+    SELECT edge.child_thread_id, subtree.depth + 1, subtree.path || edge.child_thread_id || '/'
     FROM thread_spawn_edges AS edge
     JOIN subtree ON edge.parent_thread_id = subtree.child_thread_id
+    WHERE instr(subtree.path, '/' || edge.child_thread_id || '/') = 0
                 "#,
             );
         }
@@ -3535,6 +3553,98 @@ mod tests {
             .await
             .expect("all descendants should load");
         assert_eq!(all_descendants, vec![child_thread_id, grandchild_thread_id]);
+    }
+
+    #[tokio::test]
+    async fn list_thread_spawn_descendants_terminates_on_cyclic_graph() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(
+            crate::SqliteConfig::new_for_testing(codex_home.as_path().abs()),
+            "test-provider".to_string(),
+        )
+        .await
+        .expect("state db should initialize");
+        let parent_thread_id =
+            ThreadId::from_string("00000000-0000-0000-0000-0000000009a0").expect("valid thread id");
+        let child_thread_id =
+            ThreadId::from_string("00000000-0000-0000-0000-0000000009a1").expect("valid thread id");
+        let grandchild_thread_id =
+            ThreadId::from_string("00000000-0000-0000-0000-0000000009a2").expect("valid thread id");
+
+        for (parent, child) in [
+            (parent_thread_id, child_thread_id),
+            (child_thread_id, grandchild_thread_id),
+            // Reparent the root under its own grandchild, closing a cycle.
+            (grandchild_thread_id, parent_thread_id),
+        ] {
+            runtime
+                .upsert_thread_spawn_edge(parent, child, DirectionalThreadSpawnEdgeStatus::Open)
+                .await
+                .expect("spawn edge insert should succeed");
+        }
+
+        // Without a cycle guard the recursive CTE never terminates; bound the
+        // call so a regression fails the test instead of hanging the suite.
+        let descendants = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            runtime.list_thread_spawn_descendants(parent_thread_id),
+        )
+        .await
+        .expect("cyclic descendant query should terminate")
+        .expect("descendants should load");
+
+        // The reachable descendants are returned in depth order; the cycle back
+        // to the root neither adds infinite rows nor lists the root as its own
+        // descendant.
+        assert_eq!(descendants, vec![child_thread_id, grandchild_thread_id]);
+    }
+
+    #[tokio::test]
+    async fn find_thread_spawn_descendant_by_path_terminates_on_cyclic_graph() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(
+            crate::SqliteConfig::new_for_testing(codex_home.as_path().abs()),
+            "test-provider".to_string(),
+        )
+        .await
+        .expect("state db should initialize");
+        let a =
+            ThreadId::from_string("00000000-0000-0000-0000-0000000009b0").expect("valid thread id");
+        let b =
+            ThreadId::from_string("00000000-0000-0000-0000-0000000009b1").expect("valid thread id");
+
+        // Real thread rows exist (so the outer JOIN is not short-circuited to
+        // empty), but none carries the requested agent path.
+        for (thread_id, agent_path) in [(a, "agent-a"), (b, "agent-b")] {
+            let mut metadata = test_thread_metadata(&codex_home, thread_id, codex_home.clone());
+            metadata.agent_path = Some(agent_path.to_string());
+            runtime
+                .upsert_thread(&metadata)
+                .await
+                .expect("thread insert should succeed");
+        }
+
+        // A two-node cycle A -> B -> A.
+        for (parent, child) in [(a, b), (b, a)] {
+            runtime
+                .upsert_thread_spawn_edge(parent, child, DirectionalThreadSpawnEdgeStatus::Open)
+                .await
+                .expect("spawn edge insert should succeed");
+        }
+
+        // "agent-b" matches node B, which sits on the cycle. Without a cycle
+        // guard the recursive CTE emits B infinitely and the outer
+        // ORDER BY ... LIMIT can never finish materializing, so the query hangs
+        // (or returns spurious duplicate matches). With the guard it resolves to
+        // the single matching descendant.
+        let found = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            runtime.find_thread_spawn_descendant_by_path(a, "agent-b"),
+        )
+        .await
+        .expect("cyclic descendant-by-path query should terminate")
+        .expect("query should succeed");
+        assert_eq!(found, Some(b));
     }
 
     #[tokio::test]

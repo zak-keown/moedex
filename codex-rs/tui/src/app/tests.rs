@@ -8545,6 +8545,55 @@ async fn late_usage_result_can_follow_finalized_plan() {
 }
 
 #[tokio::test]
+async fn second_usage_refresh_preserves_first_completed_card() {
+    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+
+    // First /usage completes but insertion is blocked (an active stream/queued
+    // consolidation), so its completed card must wait.
+    app.chat_widget
+        .add_token_activity_output(crate::chatwidget::TokenActivityView::Daily);
+    let first_request_id = match app_event_rx.try_recv() {
+        Ok(AppEvent::RefreshTokenActivity { request_id }) => request_id,
+        other => panic!("expected token activity refresh request, got {other:?}"),
+    };
+    app.chat_widget.note_stream_consolidation_queued();
+    assert!(
+        app.chat_widget
+            .finish_token_activity_refresh(first_request_id, Err("usage one".to_string()))
+    );
+    assert!(app.pending_usage_output_insertion_blocked());
+
+    // The user re-runs /usage before the first card is inserted.
+    app.chat_widget
+        .add_token_activity_output(crate::chatwidget::TokenActivityView::Daily);
+    let second_request_id = match app_event_rx.try_recv() {
+        Ok(AppEvent::RefreshTokenActivity { request_id }) => request_id,
+        other => panic!("expected second token activity refresh request, got {other:?}"),
+    };
+    assert!(
+        app.chat_widget
+            .finish_token_activity_refresh(second_request_id, Err("usage two".to_string()))
+    );
+
+    // Once the barrier clears, BOTH completed cards must survive — starting the
+    // second refresh must not silently drop the first.
+    app.chat_widget.note_stream_consolidation_completed();
+    assert!(!app.pending_usage_output_insertion_blocked());
+    let mut drained = 0;
+    while app
+        .chat_widget
+        .take_completed_token_activity_output()
+        .is_some()
+    {
+        drained += 1;
+    }
+    assert_eq!(
+        drained, 2,
+        "starting a second /usage refresh dropped the first completed card"
+    );
+}
+
+#[tokio::test]
 async fn new_session_requests_shutdown_for_previous_conversation() {
     Box::pin(async {
         let (mut app, mut app_event_rx, mut op_rx) = Box::pin(make_test_app_with_channels()).await;

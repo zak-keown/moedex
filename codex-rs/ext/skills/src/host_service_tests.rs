@@ -1013,3 +1013,65 @@ async fn skills_for_config_ignores_cwd_cache_when_session_flags_reenable_skill()
         .expect("demo skill should be discovered");
     assert_eq!(child_outcome.is_skill_enabled(child_skill), true);
 }
+
+#[tokio::test]
+async fn skills_for_cwd_does_not_bleed_session_config_across_sessions() {
+    let codex_home = tempfile::tempdir().expect("tempdir");
+    let cwd = tempfile::tempdir().expect("tempdir");
+    let skill_dir = codex_home.path().join("skills").join("demo");
+    fs::create_dir_all(&skill_dir).expect("create skill dir");
+    let skill_path = skill_dir.join("SKILL.md");
+    fs::write(
+        &skill_path,
+        "---\nname: demo-skill\ndescription: demo description\n---\n\n# Body\n",
+    )
+    .expect("write skill");
+    let disabled_skill_config = path_toggle_config(&skill_path, /*enabled*/ false);
+    let enabled_skill_config = path_toggle_config(&skill_path, /*enabled*/ true);
+    let parent_stack = config_stack(&codex_home, &disabled_skill_config);
+    let child_stack =
+        config_stack_with_session_flags(&codex_home, &disabled_skill_config, &enabled_skill_config);
+    let skills_service = HostSkillsService::new(
+        codex_home.path().abs(),
+        /*bundled_skills_enabled*/ true,
+    );
+    let cwd_abs = cwd.path().abs();
+
+    // Session A disables the skill and warms the cache for this cwd.
+    let parent_input = HostSkillsLoadInput::new(cwd_abs.clone(), Vec::new(), parent_stack);
+    let parent_snapshot = skills_service
+        .for_request()
+        .snapshot_for_cwd(
+            &parent_input,
+            /*force_reload*/ false,
+            Some(Arc::clone(&LOCAL_FS)),
+        )
+        .await;
+    let parent_outcome = parent_snapshot.outcome();
+    let parent_skill = parent_outcome
+        .skills
+        .iter()
+        .find(|skill| skill.name == "demo-skill")
+        .expect("demo skill should be discovered");
+    assert_eq!(parent_outcome.is_skill_enabled(parent_skill), false);
+
+    // Session B shares the cwd but re-enables the skill via session flags. It
+    // must NOT reuse session A's cached snapshot (which had the skill disabled),
+    // even though force_reload is false — the cache is keyed by config state.
+    let child_input = HostSkillsLoadInput::new(cwd_abs, Vec::new(), child_stack);
+    let child_snapshot = skills_service
+        .for_request()
+        .snapshot_for_cwd(
+            &child_input,
+            /*force_reload*/ false,
+            Some(Arc::clone(&LOCAL_FS)),
+        )
+        .await;
+    let child_outcome = child_snapshot.outcome();
+    let child_skill = child_outcome
+        .skills
+        .iter()
+        .find(|skill| skill.name == "demo-skill")
+        .expect("demo skill should be discovered");
+    assert_eq!(child_outcome.is_skill_enabled(child_skill), true);
+}
