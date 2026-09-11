@@ -3,6 +3,7 @@ use crate::model::CodexImportSelection;
 use crate::model::ConflictPolicy;
 use crate::sessions::records_codex::codex_rollout_thread_id;
 use crate::sessions::records_codex::validate_codex_rollout;
+use crate::source::codex::RolloutDiscoveryLimits;
 use crate::source::codex::discover_rollouts;
 use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -35,6 +36,7 @@ const MAX_PREVIEW_ITEMS: usize = 1_000;
 const MAX_ITEM_BYTES: usize = 20 * 1024 * 1024;
 const MAX_PREVIEW_BYTES: usize = 256 * 1024 * 1024;
 const MAX_REGISTRY_BYTES: usize = 512 * 1024 * 1024;
+const MAX_DISCOVERY_DIRECTORIES: usize = 4_096;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -151,6 +153,7 @@ pub async fn preview_codex_import(
     }
 
     let mut items = Vec::new();
+    let mut stored_bytes = 0_usize;
     if selection.settings {
         let config = source.join(CONFIG_FILE);
         if config.is_file() {
@@ -159,7 +162,7 @@ pub async fn preview_codex_import(
                 io::Error::new(io::ErrorKind::InvalidData, "Codex config is not UTF-8")
             })?;
             let (payload, review_reasons) = sanitized_codex_config(raw)?;
-            items.push(planned_snapshot(
+            let item = planned_snapshot(
                 ImportItemKind::Settings,
                 PathBuf::from(CONFIG_FILE),
                 snapshot,
@@ -167,19 +170,26 @@ pub async fn preview_codex_import(
                 &destination,
                 review_reasons,
                 None,
-            )?);
+            )?;
+            push_planned_item(&mut items, &mut stored_bytes, item)?;
         }
     }
     if selection.sessions {
         let destination_thread_ids = destination_thread_ids(&destination)?;
-        for rollout in discover_rollouts(&source)? {
+        let reserved_items = usize::from(selection.credentials);
+        let max_rollouts = MAX_PREVIEW_ITEMS.saturating_sub(items.len() + reserved_items);
+        let max_rollout_bytes = MAX_PREVIEW_BYTES.saturating_sub(stored_bytes);
+        for rollout in discover_rollouts(
+            &source,
+            rollout_discovery_limits(max_rollouts, max_rollout_bytes),
+        )? {
             let relative_path = rollout
                 .strip_prefix(&source)
                 .map_err(io::Error::other)?
                 .to_path_buf();
             let snapshot = read_stable_snapshot(&rollout)?;
             if let Err(error) = validate_codex_rollout(&snapshot.bytes) {
-                items.push(PlannedItem {
+                let item = PlannedItem {
                     preview: ImportPreviewItem {
                         kind: ImportItemKind::Session,
                         relative_path,
@@ -193,12 +203,13 @@ pub async fn preview_codex_import(
                     source: None,
                     payload: None,
                     thread_id: None,
-                });
+                };
+                push_planned_item(&mut items, &mut stored_bytes, item)?;
                 continue;
             }
             let thread_id = codex_rollout_thread_id(&snapshot.bytes)?;
             if destination_thread_ids.contains(&thread_id) {
-                items.push(PlannedItem {
+                let item = PlannedItem {
                     preview: ImportPreviewItem {
                         kind: ImportItemKind::Session,
                         relative_path,
@@ -213,11 +224,12 @@ pub async fn preview_codex_import(
                     source: None,
                     payload: None,
                     thread_id: Some(thread_id),
-                });
+                };
+                push_planned_item(&mut items, &mut stored_bytes, item)?;
                 continue;
             }
             let payload = snapshot.bytes.clone();
-            items.push(planned_snapshot(
+            let item = planned_snapshot(
                 ImportItemKind::Session,
                 relative_path,
                 snapshot,
@@ -225,11 +237,12 @@ pub async fn preview_codex_import(
                 &destination,
                 Vec::new(),
                 Some(thread_id),
-            )?);
+            )?;
+            push_planned_item(&mut items, &mut stored_bytes, item)?;
         }
     }
     if selection.credentials {
-        items.push(PlannedItem {
+        let item = PlannedItem {
             preview: ImportPreviewItem {
                 kind: ImportItemKind::Credentials,
                 relative_path: PathBuf::from(AUTH_FILE),
@@ -243,13 +256,10 @@ pub async fn preview_codex_import(
             source: None,
             payload: None,
             thread_id: None,
-        });
+        };
+        push_planned_item(&mut items, &mut stored_bytes, item)?;
     }
 
-    let stored_bytes = items
-        .iter()
-        .map(|item| item.payload.as_ref().map_or(0, Vec::len))
-        .sum::<usize>();
     validate_preview_bounds(items.len(), stored_bytes)?;
 
     let id = preview_id(&source, &destination, &selection, &items);
@@ -287,6 +297,24 @@ fn validate_preview_bounds(item_count: usize, stored_bytes: usize) -> io::Result
             format!("Codex import preview exceeds the {MAX_PREVIEW_BYTES}-byte limit"),
         ));
     }
+    Ok(())
+}
+
+fn push_planned_item(
+    items: &mut Vec<PlannedItem>,
+    stored_bytes: &mut usize,
+    item: PlannedItem,
+) -> io::Result<()> {
+    let item_bytes = item.payload.as_ref().map_or(0, Vec::len);
+    let next_bytes = stored_bytes.checked_add(item_bytes).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Codex import preview byte count overflowed",
+        )
+    })?;
+    validate_preview_bounds(items.len().saturating_add(1), next_bytes)?;
+    *stored_bytes = next_bytes;
+    items.push(item);
     Ok(())
 }
 
@@ -335,7 +363,7 @@ pub async fn apply_codex_import(
                 "Codex import file plan has no source hash",
             ));
         };
-        if sha256_file(&source_path)? != expected_hash {
+        if sha256_file_bounded(&source_path)? != expected_hash {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("source changed after preview: {}", source_path.display()),
@@ -359,7 +387,7 @@ pub async fn apply_codex_import(
                 continue;
             }
         }
-        if target.is_file() && sha256_file(&target)? == sha256_bytes(&payload) {
+        if target.is_file() && sha256_file_bounded(&target)? == sha256_bytes(&payload) {
             report.already_present = report.already_present.saturating_add(1);
             record_import(&destination, &mut ledger, &item.preview, expected_hash)?;
             report.items.push(item_outcome(
@@ -552,12 +580,48 @@ fn item_outcome(
 }
 
 fn destination_thread_ids(destination: &Path) -> io::Result<HashSet<ThreadId>> {
-    let thread_ids = discover_rollouts(destination)?
-        .into_iter()
-        .filter_map(|path| read_stable_snapshot(&path).ok())
-        .filter_map(|snapshot| codex_rollout_thread_id(&snapshot.bytes).ok())
-        .collect::<HashSet<_>>();
+    destination_thread_ids_with_snapshot_reader(destination, read_stable_snapshot)
+}
+
+fn destination_thread_ids_with_snapshot_reader(
+    destination: &Path,
+    mut read_snapshot: impl FnMut(&Path) -> io::Result<FileSnapshot>,
+) -> io::Result<HashSet<ThreadId>> {
+    let mut thread_ids = HashSet::new();
+    let mut stored_bytes = 0_usize;
+    for path in discover_rollouts(
+        destination,
+        rollout_discovery_limits(MAX_PREVIEW_ITEMS, MAX_PREVIEW_BYTES),
+    )? {
+        let snapshot = read_snapshot(&path)?;
+        stored_bytes = stored_bytes
+            .checked_add(snapshot.bytes.len())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Codex rollout inventory byte count overflowed",
+                )
+            })?;
+        if stored_bytes > MAX_PREVIEW_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Codex rollout inventory exceeds the {MAX_PREVIEW_BYTES}-byte aggregate limit"
+                ),
+            ));
+        }
+        thread_ids.insert(codex_rollout_thread_id(&snapshot.bytes)?);
+    }
     Ok(thread_ids)
+}
+
+fn rollout_discovery_limits(max_files: usize, max_total_bytes: usize) -> RolloutDiscoveryLimits {
+    RolloutDiscoveryLimits {
+        max_directories: MAX_DISCOVERY_DIRECTORIES,
+        max_files,
+        max_item_bytes: MAX_ITEM_BYTES as u64,
+        max_total_bytes: max_total_bytes as u64,
+    }
 }
 
 fn read_stable_snapshot(path: &Path) -> io::Result<FileSnapshot> {
@@ -630,8 +694,8 @@ fn preview_id(
     format!("{:x}", digest.finalize())
 }
 
-fn sha256_file(path: &Path) -> io::Result<String> {
-    Ok(sha256_bytes(&fs::read(path)?))
+fn sha256_file_bounded(path: &Path) -> io::Result<String> {
+    Ok(read_stable_snapshot(path)?.sha256)
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {

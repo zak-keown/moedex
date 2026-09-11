@@ -43,3 +43,17 @@ Review-fix validation, in execution order:
 - `just fix -p codex-external-agent-migration`: completed and applied two Clippy fixes.
 - `just fix -p codex-cli`: completed cleanly.
 - `just fmt`: completed last; tests were not rerun afterward as required.
+
+## Re-review round 1 fixes
+
+- Destination rollout inventory now propagates every discovery, metadata, bounded-snapshot, mutation, size, and rollout-parse error. Session import cannot proceed when any existing destination thread identity is uncertain.
+- Rollout traversal bounds its queued directories, admitted JSONL paths, each file's metadata size, and aggregate metadata size while discovering. Preview accumulation checks item count and retained bytes before each item is pushed.
+- Apply source and destination hashes now use the capped stable-snapshot reader, rejecting files that expand past the per-item limit or change during hashing without an unbounded `fs::read`.
+
+Focused regression coverage includes injected destination read failure, oversized, concurrently mutating, and malformed destination rollouts; source directory, item-count, per-item, and aggregate discovery limits; admission-before-retention; and a source expanded past the limit between preview and apply.
+
+Validation:
+
+- `just test -p codex-external-agent-migration source_codex`: 26 passed, 169 skipped.
+- `just fix -p codex-external-agent-migration`: completed.
+- `just fmt`: completed last; tests were not rerun afterward as required.

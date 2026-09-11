@@ -463,6 +463,200 @@ async fn existing_different_session_is_never_replaced() {
 }
 
 #[test]
+fn destination_inventory_propagates_snapshot_read_errors() {
+    let root = TempDir::new().expect("tempdir");
+    let rollout = root.path().join("sessions/rollout.jsonl");
+    fs::create_dir_all(rollout.parent().expect("parent")).expect("sessions");
+    fs::write(&rollout, valid_rollout_line(root.path())).expect("rollout");
+
+    let error = destination_thread_ids_with_snapshot_reader(root.path(), |_| {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "synthetic unreadable rollout",
+        ))
+    })
+    .expect_err("destination read errors must block inventory");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+}
+
+#[test]
+fn destination_inventory_rejects_oversized_rollouts() {
+    let root = TempDir::new().expect("tempdir");
+    let rollout = root.path().join("sessions/rollout.jsonl");
+    fs::create_dir_all(rollout.parent().expect("parent")).expect("sessions");
+    fs::File::create(&rollout)
+        .expect("rollout")
+        .set_len(MAX_ITEM_BYTES as u64 + 1)
+        .expect("oversized rollout");
+
+    let error = destination_thread_ids(root.path())
+        .expect_err("oversized destination rollout must block inventory");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("item limit"));
+}
+
+#[test]
+fn destination_inventory_rejects_mutating_rollouts() {
+    use std::io::Write;
+
+    let root = TempDir::new().expect("tempdir");
+    let rollout = root.path().join("sessions/rollout.jsonl");
+    fs::create_dir_all(rollout.parent().expect("parent")).expect("sessions");
+    fs::write(&rollout, valid_rollout_line(root.path())).expect("rollout");
+
+    let error = destination_thread_ids_with_snapshot_reader(root.path(), |path| {
+        read_stable_snapshot_with_after_read(path, || {
+            let mut source = fs::OpenOptions::new()
+                .append(true)
+                .open(path)
+                .expect("open rollout");
+            source.write_all(b"changed").expect("append rollout");
+            source.sync_all().expect("sync rollout");
+        })
+    })
+    .expect_err("mutating destination rollout must block inventory");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn destination_inventory_rejects_unparseable_rollouts() {
+    let root = TempDir::new().expect("tempdir");
+    let rollout = root.path().join("sessions/rollout.jsonl");
+    fs::create_dir_all(rollout.parent().expect("parent")).expect("sessions");
+    fs::write(&rollout, "not a rollout\n").expect("rollout");
+
+    let error = destination_thread_ids(root.path())
+        .expect_err("unparseable destination rollout must block inventory");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[tokio::test]
+async fn source_discovery_rejects_too_many_rollouts_before_reading_them() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    let sessions = source.join("sessions");
+    fs::create_dir_all(&sessions).expect("sessions");
+    fs::create_dir_all(&destination).expect("destination");
+    for index in 0..=MAX_PREVIEW_ITEMS {
+        fs::File::create(sessions.join(format!("rollout-{index}.jsonl"))).expect("rollout");
+    }
+
+    let error = preview_codex_import(
+        abs(&source),
+        abs(&destination),
+        CodexImportSelection {
+            settings: false,
+            sessions: true,
+            credentials: false,
+            conflict_policy: ConflictPolicy::Skip,
+        },
+    )
+    .await
+    .expect_err("too many source rollouts must be rejected");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("item limit"));
+}
+
+#[tokio::test]
+async fn source_discovery_rejects_aggregate_rollout_bytes_before_reading_them() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    let sessions = source.join("sessions");
+    fs::create_dir_all(&sessions).expect("sessions");
+    fs::create_dir_all(&destination).expect("destination");
+    for index in 0..=MAX_PREVIEW_BYTES / MAX_ITEM_BYTES {
+        fs::File::create(sessions.join(format!("rollout-{index}.jsonl")))
+            .expect("rollout")
+            .set_len(MAX_ITEM_BYTES as u64)
+            .expect("sparse rollout");
+    }
+
+    let error = preview_codex_import(
+        abs(&source),
+        abs(&destination),
+        CodexImportSelection {
+            settings: false,
+            sessions: true,
+            credentials: false,
+            conflict_policy: ConflictPolicy::Skip,
+        },
+    )
+    .await
+    .expect_err("aggregate source rollout bytes must be rejected");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("aggregate limit"));
+}
+
+#[test]
+fn source_discovery_rejects_too_many_directories() {
+    use crate::source::codex::RolloutDiscoveryLimits;
+    use crate::source::codex::discover_rollouts;
+
+    let root = TempDir::new().expect("tempdir");
+    fs::create_dir_all(root.path().join("sessions/nested")).expect("sessions");
+
+    let error = discover_rollouts(
+        root.path(),
+        RolloutDiscoveryLimits {
+            max_directories: 1,
+            max_files: MAX_PREVIEW_ITEMS,
+            max_item_bytes: MAX_ITEM_BYTES as u64,
+            max_total_bytes: MAX_PREVIEW_BYTES as u64,
+        },
+    )
+    .expect_err("too many source directories must be rejected");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("directory limit"));
+}
+
+#[tokio::test]
+async fn apply_rejects_a_source_that_expands_beyond_the_item_limit() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    let relative = "sessions/2026/09/10/rollout-expanded.jsonl";
+    let rollout = source.join(relative);
+    fs::create_dir_all(rollout.parent().expect("parent")).expect("sessions");
+    fs::create_dir_all(&destination).expect("destination");
+    fs::write(&rollout, valid_rollout_line(root.path())).expect("rollout");
+    let preview = preview_codex_import(
+        abs(&source),
+        abs(&destination),
+        CodexImportSelection {
+            settings: false,
+            sessions: true,
+            credentials: false,
+            conflict_policy: ConflictPolicy::Skip,
+        },
+    )
+    .await
+    .expect("preview");
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&rollout)
+        .expect("source rollout")
+        .set_len(MAX_ITEM_BYTES as u64 + 1)
+        .expect("expanded rollout");
+
+    let error = apply_codex_import(&preview.id, preview.selection)
+        .await
+        .expect_err("expanded source must be rejected before hashing");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("byte limit"));
+    assert!(!destination.join(relative).exists());
+}
+
+#[test]
 fn stable_snapshot_rejects_a_concurrent_append() {
     use std::io::Write;
 
@@ -512,6 +706,25 @@ fn preview_registry_evicts_before_crossing_its_aggregate_byte_limit() {
 fn preview_bounds_reject_aggregate_bytes_and_item_count() {
     assert!(validate_preview_bounds(MAX_PREVIEW_ITEMS + 1, 0).is_err());
     assert!(validate_preview_bounds(1, MAX_PREVIEW_BYTES + 1).is_err());
+}
+
+#[test]
+fn preview_accumulation_rejects_before_retaining_an_over_limit_item() {
+    let mut items = Vec::new();
+    let mut stored_bytes = MAX_PREVIEW_BYTES;
+    let item = PlannedItem {
+        preview: preview_item("sessions/rollout.jsonl"),
+        source: None,
+        payload: Some(vec![0]),
+        thread_id: None,
+    };
+
+    let error = push_planned_item(&mut items, &mut stored_bytes, item)
+        .expect_err("over-limit item must not be retained");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(items.is_empty());
+    assert_eq!(stored_bytes, MAX_PREVIEW_BYTES);
 }
 
 #[tokio::test]
