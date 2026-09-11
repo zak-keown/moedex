@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use codex_core::config::Config;
+use codex_http_client::HttpClientFactory;
 use codex_extension_api::ConfigContributor;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionFuture;
@@ -32,6 +33,7 @@ struct ImageGenerationExtensionConfig {
     available: bool,
     provider: ModelProviderInfo,
     save_root: Option<AbsolutePathBuf>,
+    http_client_factory: HttpClientFactory,
 }
 
 impl ImageGenerationExtensionConfig {
@@ -43,6 +45,9 @@ impl ImageGenerationExtensionConfig {
                 || config.model_provider.uses_openai_actor_authorization(),
             provider: config.model_provider.clone(),
             save_root: resolve_save_root(config),
+            // Captured here (where &Config is available) so the backend built in
+            // `tools()` honors the configured outbound proxy / custom-CA policy.
+            http_client_factory: config.http_client_factory(),
         }
     }
 }
@@ -100,6 +105,7 @@ impl ToolContributor for ImageGenerationExtension {
                 thread_store
                     .get::<ThreadOriginator>()
                     .map(|originator| originator.0.clone()),
+                config.http_client_factory.clone(),
             ),
             config.save_root.clone(),
             thread_store.level_id().to_string(),
