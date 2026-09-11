@@ -6,7 +6,6 @@ use toml_edit::DocumentMut;
 use toml_edit::Item as TomlItem;
 use toml_edit::Table as TomlTable;
 use toml_edit::Value as TomlValue;
-use toml_edit::value;
 
 use crate::CONFIG_TOML_FILE;
 
@@ -89,26 +88,66 @@ fn upsert_marketplace(
     let Some(marketplaces_item) = root.get_mut("marketplaces") else {
         return;
     };
-    if !marketplaces_item.is_table() {
-        *marketplaces_item = TomlItem::Table(new_implicit_table());
-    }
 
-    let Some(marketplaces) = marketplaces_item.as_table_mut() else {
-        return;
-    };
-    let mut entry = TomlTable::new();
-    entry.set_implicit(false);
-    entry["source_type"] = value(update.source_type.to_string());
-    entry["source"] = value(update.source.to_string());
+    // Preserve whichever container form the user already has. `marketplaces`
+    // may legitimately be a proper table (`[marketplaces]` / `[marketplaces.x]`)
+    // or a single inline table (`marketplaces = { a = {..}, b = {..} }`, which
+    // `remove_marketplace` also supports). The previous code only recognized
+    // the proper-table form and overwrote an inline table with an empty one,
+    // silently dropping every already-configured marketplace.
+    match marketplaces_item {
+        TomlItem::Table(marketplaces) => {
+            let mut entry = TomlTable::new();
+            entry.set_implicit(false);
+            for (key, val) in marketplace_entry_fields(update) {
+                entry[key] = TomlItem::Value(val);
+            }
+            marketplaces.insert(marketplace_name, TomlItem::Table(entry));
+        }
+        TomlItem::Value(value) if value.is_inline_table() => {
+            let Some(marketplaces) = value.as_inline_table_mut() else {
+                return;
+            };
+            let mut entry = toml_edit::InlineTable::new();
+            for (key, val) in marketplace_entry_fields(update) {
+                entry.insert(key, val);
+            }
+            marketplaces.insert(marketplace_name, TomlValue::InlineTable(entry));
+        }
+        // Any other shape (a bare string, an array, etc.) is not a marketplaces
+        // table at all; replace it with a fresh table, as before.
+        _ => {
+            *marketplaces_item = TomlItem::Table(new_implicit_table());
+            if let Some(marketplaces) = marketplaces_item.as_table_mut() {
+                let mut entry = TomlTable::new();
+                entry.set_implicit(false);
+                for (key, val) in marketplace_entry_fields(update) {
+                    entry[key] = TomlItem::Value(val);
+                }
+                marketplaces.insert(marketplace_name, TomlItem::Table(entry));
+            }
+        }
+    }
+}
+
+/// The field set of a single marketplace entry, as `toml_edit::Value`s so it can
+/// populate either a proper table or an inline table without duplicating the
+/// field logic.
+fn marketplace_entry_fields(update: &MarketplaceConfigUpdate<'_>) -> Vec<(&'static str, TomlValue)> {
+    let mut fields = vec![
+        ("source_type", TomlValue::from(update.source_type.to_string())),
+        ("source", TomlValue::from(update.source.to_string())),
+    ];
     if let Some(ref_name) = update.ref_name {
-        entry["ref"] = value(ref_name.to_string());
+        fields.push(("ref", TomlValue::from(ref_name.to_string())));
     }
     if !update.sparse_paths.is_empty() {
-        entry["sparse_paths"] = TomlItem::Value(TomlValue::Array(
-            update.sparse_paths.iter().map(String::as_str).collect(),
+        fields.push((
+            "sparse_paths",
+            TomlValue::Array(update.sparse_paths.iter().map(String::as_str).collect()),
         ));
     }
-    marketplaces.insert(marketplace_name, TomlItem::Table(entry));
+    fields
 }
 
 fn remove_marketplace(
@@ -268,6 +307,48 @@ mod tests {
             RemoveMarketplaceConfigOutcome::NameCaseMismatch {
                 configured_name: "debug".to_string()
             }
+        );
+    }
+
+    #[test]
+    fn record_user_marketplace_config_preserves_inline_table_entries() {
+        let codex_home = TempDir::new().unwrap();
+        fs::write(
+            codex_home.path().join(CONFIG_TOML_FILE),
+            r#"
+marketplaces = {
+  debug = { source_type = "git", source = "https://github.com/owner/repo.git" },
+  other = { source_type = "local", source = "/tmp/marketplace" },
+}
+"#,
+        )
+        .unwrap();
+
+        let update = MarketplaceConfigUpdate {
+            source_type: "git",
+            source: "https://github.com/owner/new.git",
+            ref_name: None,
+            sparse_paths: &[],
+        };
+        record_user_marketplace(codex_home.path(), "newone", &update).unwrap();
+
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(codex_home.path().join(CONFIG_TOML_FILE)).unwrap())
+                .unwrap();
+        let marketplaces = config
+            .get("marketplaces")
+            .expect("marketplaces table");
+        assert!(
+            marketplaces.get("debug").is_some(),
+            "existing inline-table marketplace `debug` must be preserved"
+        );
+        assert!(
+            marketplaces.get("other").is_some(),
+            "existing inline-table marketplace `other` must be preserved"
+        );
+        assert!(
+            marketplaces.get("newone").is_some(),
+            "newly added marketplace must be present"
         );
     }
 
