@@ -1401,8 +1401,8 @@ impl Session {
     }
 
     /// Render the request copy without changing instructions persisted or inherited by forks.
-    /// Model-provided instructions receive the Moedex application identity here so every catalog
-    /// template follows the distribution branding while explicit user overrides remain literal.
+    /// Every request receives the Moedex application identity here while the persisted model or
+    /// custom instruction template remains literal for resume and fork compatibility.
     pub(crate) async fn get_prompt_base_instructions(&self) -> BaseInstructions {
         let config = self.get_config().await;
         let mut instructions = self.get_base_instructions().await;
@@ -1416,10 +1416,7 @@ impl Session {
             instructions.text =
                 crate::context::without_update_plan_instructions(&instructions.text);
         }
-        if matches!(
-            instructions.provenance,
-            Some(BaseInstructionsProvenance::Model { .. })
-        ) && !instructions
+        if !instructions
             .text
             .contains(crate::context::MOEDEX_IDENTITY_INSTRUCTION)
         {
