@@ -64,6 +64,10 @@ class ReleaseWorkflowTest(unittest.TestCase):
         )[0]
 
         self.assertIn("qualify-release-packages:", unix)
+        checkout = qualification.split("uses: actions/checkout@", 1)[1].split(
+            "\n      -", 1
+        )[0]
+        self.assertIn("fetch-depth: 0", checkout)
         self.assertIn("moedex_behavior_manifest.py package-journeys", qualification)
         self.assertIn("sdk/python/tests", qualification)
         self.assertIn("--cli-archive", qualification)

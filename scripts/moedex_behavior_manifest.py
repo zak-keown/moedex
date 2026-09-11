@@ -43,7 +43,12 @@ REQUIREMENT_FIELDS = {
     "reason",
 }
 ARTIFACT_FIELDS = {"paths", "executable"}
-SOURCE_INVENTORY_FIELDS = {"files", "expectations", "forbiddenRegex"}
+SOURCE_INVENTORY_FIELDS = {
+    "files",
+    "discoveryGlobs",
+    "expectations",
+    "forbiddenRegex",
+}
 EXPECTATION_FIELDS = {"path", "literal", "count"}
 FORBIDDEN_FIELDS = {"path", "pattern"}
 
@@ -221,6 +226,22 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
                     if path in seen_files:
                         errors.append(f"duplicate source inventory file: {path}")
                     seen_files.add(path)
+        discovery_globs = inventory.get("discoveryGlobs")
+        if not isinstance(discovery_globs, list) or not discovery_globs:
+            errors.append("sourceInventory discoveryGlobs must be a nonempty array")
+        else:
+            seen_globs: set[str] = set()
+            for value in discovery_globs:
+                pattern, pattern_errors = _safe_relative_path(
+                    value, "source inventory discovery glob"
+                )
+                errors.extend(pattern_errors)
+                if pattern is not None:
+                    if pattern in seen_globs:
+                        errors.append(
+                            f"duplicate source inventory discovery glob: {pattern}"
+                        )
+                    seen_globs.add(pattern)
         covered_files: set[str] = set()
         expectations = inventory.get("expectations")
         if not isinstance(expectations, list) or not expectations:
@@ -307,6 +328,19 @@ def verify_source_inventory(manifest: dict[str, Any], repo_root: Path) -> list[s
     inventory = manifest["sourceInventory"]
     contents: dict[str, str] = {}
     errors: list[str] = []
+    discovered = {
+        path.relative_to(repo_root).as_posix()
+        for pattern in inventory["discoveryGlobs"]
+        for path in repo_root.glob(pattern)
+        if path.is_file() or path.is_symlink()
+    }
+    inventoried = set(inventory["files"])
+    if discovered != inventoried:
+        errors.append(
+            "discovered source inventory differs from manifest: "
+            f"missing {sorted(discovered - inventoried)}, "
+            f"unexpected {sorted(inventoried - discovered)}"
+        )
     for relative in inventory["files"]:
         path, path_errors = _resolve_regular_file(
             repo_root, relative, "source inventory file"
@@ -553,6 +587,8 @@ def _validate_package(
                 "codex-resources/codex-windows-sandbox-setup.exe",
             ]
         )
+    if "apple-darwin" in target:
+        required_helpers.append("codex-resources/zsh/bin/zsh")
     required_helpers.append(expected_entrypoint)
     for relative in required_helpers:
         helper, helper_errors = _resolve_regular_file(
@@ -610,6 +646,23 @@ def _validate_package(
             "package platform helper inventory mismatch: "
             f"expected {sorted(expected_resource_files)}, got {sorted(actual_resource_files)}"
         )
+    if "apple-darwin" in target:
+        zsh_resource = "codex-resources/zsh/bin/zsh"
+        actual_resources = {
+            path for path in payloads if path.startswith("codex-resources/")
+        }
+        if expected_variant == "codex":
+            if not all(
+                path == zsh_resource or path.startswith("codex-resources/voice/")
+                for path in actual_resources
+            ):
+                errors.append("primary macOS resource inventory contains unknown files")
+            errors.extend(_validate_voice_resources(package_root, metadata))
+        elif actual_resources != {zsh_resource}:
+            errors.append(
+                "app-server macOS resource inventory mismatch: "
+                f"expected {[zsh_resource]}, got {sorted(actual_resources)}"
+            )
     for relative, expected in checksums.items():
         safe, safe_errors = _safe_relative_path(relative, "package checksum path")
         errors.extend(safe_errors)
@@ -622,6 +675,81 @@ def _validate_package(
         ):
             errors.append(f"package checksum mismatch: {relative}")
     return errors, metadata
+
+
+def _validate_voice_resources(
+    package_root: Path, package_metadata: dict[str, Any]
+) -> list[str]:
+    errors: list[str] = []
+    voice_root = package_root / "codex-resources/voice"
+    required = {
+        "bin/codex-voice-host",
+        "runtime.json",
+        "NOTICE.md",
+        "sources.json",
+        "lib/libgstreamer-1.0.0.dylib",
+        "licenses/LGPL-2.1.txt",
+        "licenses/Opus.txt",
+        "licenses/PCRE2.md",
+        "licenses/libffi.txt",
+        "licenses/proxy-libintl.txt",
+        "licenses/sljit.txt",
+        "licenses/zlib.txt",
+    }
+    for relative in sorted(required):
+        _, path_errors = _resolve_regular_file(
+            voice_root, relative, "required voice resource"
+        )
+        errors.extend(path_errors)
+    manifest_path, path_errors = _resolve_regular_file(
+        voice_root, "manifest.json", "required voice resource"
+    )
+    errors.extend(path_errors)
+    if manifest_path is None:
+        return errors
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        return [*errors, f"invalid voice manifest: {error}"]
+    provenance = package_metadata.get("provenance", {})
+    expected_fields = {
+        "schemaVersion": 1,
+        "buildCommit": provenance.get("forkCommit"),
+        "appTarget": package_metadata.get("target"),
+        "voiceTarget": package_metadata.get("target"),
+        "appVersion": package_metadata.get("version"),
+    }
+    for field, expected in expected_fields.items():
+        if manifest.get(field) != expected:
+            errors.append(
+                f"voice manifest {field} mismatch: expected {expected!r}, "
+                f"got {manifest.get(field)!r}"
+            )
+    digests = manifest.get("sha256")
+    if not isinstance(digests, dict):
+        return [*errors, "voice manifest sha256 must be an object"]
+    voice_payloads = {
+        path.relative_to(package_root).as_posix()
+        for path in voice_root.rglob("*")
+        if path.is_file() and path != manifest_path
+    }
+    expected_payloads = {package_metadata.get("entrypoint"), *voice_payloads}
+    if set(digests) != expected_payloads:
+        errors.append("voice manifest does not exactly cover app and voice payloads")
+    for relative, expected in digests.items():
+        safe, safe_errors = _safe_relative_path(relative, "voice checksum path")
+        errors.extend(safe_errors)
+        if safe is None:
+            continue
+        path, file_errors = _resolve_regular_file(
+            package_root, safe, "voice manifest payload"
+        )
+        errors.extend(file_errors)
+        if path is not None and (
+            not isinstance(expected, str) or _sha256(path) != expected
+        ):
+            errors.append(f"voice manifest checksum mismatch: {relative}")
+    return errors
 
 
 def verify_artifacts(

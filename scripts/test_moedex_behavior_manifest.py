@@ -31,6 +31,7 @@ def fixture_manifest() -> dict:
     manifest = copy.deepcopy(repository_manifest())
     manifest["sourceInventory"] = {
         "files": ["surface.txt", "second.txt"],
+        "discoveryGlobs": ["*.txt"],
         "expectations": [
             {
                 "path": "surface.txt",
@@ -76,11 +77,49 @@ def write_package(
                 "codex-resources/codex-windows-sandbox-setup.exe",
             ]
         )
+    if "apple-darwin" in target:
+        payloads.append("codex-resources/zsh/bin/zsh")
+        if Path(entrypoint).name == "moedex":
+            voice_files = [
+                "codex-resources/voice/bin/codex-voice-host",
+                "codex-resources/voice/runtime.json",
+                "codex-resources/voice/NOTICE.md",
+                "codex-resources/voice/sources.json",
+                "codex-resources/voice/lib/libgstreamer-1.0.0.dylib",
+                "codex-resources/voice/licenses/LGPL-2.1.txt",
+                "codex-resources/voice/licenses/Opus.txt",
+                "codex-resources/voice/licenses/PCRE2.md",
+                "codex-resources/voice/licenses/libffi.txt",
+                "codex-resources/voice/licenses/proxy-libintl.txt",
+                "codex-resources/voice/licenses/sljit.txt",
+                "codex-resources/voice/licenses/zlib.txt",
+            ]
+            payloads.extend(voice_files)
     for relative in payloads:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(relative, encoding="utf-8")
         path.chmod(0o755)
+    if "apple-darwin" in target and Path(entrypoint).name == "moedex":
+        voice_payloads = [
+            relative
+            for relative in payloads
+            if relative.startswith("codex-resources/voice/")
+        ]
+        voice_manifest = {
+            "schemaVersion": 1,
+            "buildCommit": "f" * 40,
+            "appTarget": target,
+            "voiceTarget": target,
+            "appVersion": "0.1.0",
+            "sha256": {
+                relative: hashlib.sha256((root / relative).read_bytes()).hexdigest()
+                for relative in [entrypoint, *voice_payloads]
+            },
+        }
+        voice_manifest_path = root / "codex-resources/voice/manifest.json"
+        voice_manifest_path.write_text(json.dumps(voice_manifest), encoding="utf-8")
+        payloads.append("codex-resources/voice/manifest.json")
     metadata = {
         "layoutVersion": 1,
         "version": "0.1.0",
@@ -264,6 +303,18 @@ def test_source_inventory_is_an_exact_multiset_and_rejects_upstream_adoption(
     )
 
 
+def test_source_inventory_rejects_newly_discovered_surface(tmp_path: Path) -> None:
+    manifest = fixture_manifest()
+    source_fixture(tmp_path)
+    (tmp_path / "new-update-surface.txt").write_text(
+        "https://github.com/openai/codex/releases/latest", encoding="utf-8"
+    )
+
+    errors = behavior.verify_source_inventory(manifest, tmp_path)
+
+    assert any("discovered source inventory differs" in error for error in errors)
+
+
 def test_upstream_rebase_mutations_cannot_silently_drop_a_mapped_behavior(
     tmp_path: Path,
 ) -> None:
@@ -363,6 +414,88 @@ def test_app_server_package_requires_platform_helpers(tmp_path: Path) -> None:
     errors, _ = behavior.verify_artifacts(manifest, artifact_root)
     assert (
         "app-server: missing required package helper: codex-resources/bwrap" in errors
+    )
+
+
+@pytest.mark.parametrize("variant", ["cli", "app-server"])
+def test_macos_package_requires_zsh_after_checksum_refresh(
+    tmp_path: Path, variant: str
+) -> None:
+    manifest = fixture_manifest()
+    artifact_root = tmp_path / "artifacts"
+    target = "aarch64-apple-darwin"
+    write_package(artifact_root / "cli", "bin/moedex", target)
+    write_package(artifact_root / "app-server", "bin/codex-app-server", target)
+    package = artifact_root / variant
+    (package / "codex-resources/zsh/bin/zsh").unlink()
+    metadata_path = package / "codex-package.json"
+    metadata = json.loads(metadata_path.read_text())
+    del metadata["checksums"]["codex-resources/zsh/bin/zsh"]
+    metadata_path.write_text(json.dumps(metadata))
+
+    errors, _ = behavior.verify_artifacts(manifest, artifact_root)
+
+    assert any(
+        f"{variant}: missing required package helper: codex-resources/zsh/bin/zsh"
+        in error
+        for error in errors
+    )
+
+
+def test_primary_macos_package_requires_voice_after_checksum_refresh(
+    tmp_path: Path,
+) -> None:
+    manifest = fixture_manifest()
+    artifact_root = tmp_path / "artifacts"
+    target = "x86_64-apple-darwin"
+    write_package(artifact_root / "cli", "bin/moedex", target)
+    write_package(artifact_root / "app-server", "bin/codex-app-server", target)
+    package = artifact_root / "cli"
+    voice_files = list((package / "codex-resources/voice").rglob("*"))
+    for path in reversed(voice_files):
+        if path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            path.rmdir()
+    (package / "codex-resources/voice").rmdir()
+    metadata_path = package / "codex-package.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["checksums"] = {
+        relative: digest
+        for relative, digest in metadata["checksums"].items()
+        if not relative.startswith("codex-resources/voice/")
+    }
+    metadata_path.write_text(json.dumps(metadata))
+
+    errors, _ = behavior.verify_artifacts(manifest, artifact_root)
+
+    assert any("cli: missing required voice resource" in error for error in errors)
+
+
+def test_app_server_macos_package_rejects_unexpected_voice_resources(
+    tmp_path: Path,
+) -> None:
+    manifest = fixture_manifest()
+    artifact_root = tmp_path / "artifacts"
+    target = "aarch64-apple-darwin"
+    write_package(artifact_root / "cli", "bin/moedex", target)
+    write_package(artifact_root / "app-server", "bin/codex-app-server", target)
+    package = artifact_root / "app-server"
+    unexpected = package / "codex-resources/voice/manifest.json"
+    unexpected.parent.mkdir(parents=True)
+    unexpected.write_text("{}", encoding="utf-8")
+    metadata_path = package / "codex-package.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["checksums"]["codex-resources/voice/manifest.json"] = hashlib.sha256(
+        unexpected.read_bytes()
+    ).hexdigest()
+    metadata_path.write_text(json.dumps(metadata))
+
+    errors, _ = behavior.verify_artifacts(manifest, artifact_root)
+
+    assert any(
+        "app-server: app-server macOS resource inventory mismatch" in error
+        for error in errors
     )
 
 
