@@ -49,7 +49,7 @@ async fn preview_and_cancel_leave_both_homes_byte_identical() {
 }
 
 #[tokio::test]
-async fn explicitly_selected_credentials_import_without_entering_preview() {
+async fn explicitly_selected_credentials_import_without_exposing_secret_in_public_preview() {
     let root = TempDir::new().expect("tempdir");
     let source = root.path().join("source");
     let destination = root.path().join("destination");
@@ -91,7 +91,7 @@ async fn explicitly_selected_credentials_import_without_entering_preview() {
     assert_eq!(report.items[0].disposition, ImportDisposition::Imported);
     assert!(!format!("{report:?}").contains(secret));
     assert!(
-        fs::read_to_string(destination.join("auth.json"))
+        fs::read_to_string(destination.join("moedex-auth.json"))
             .expect("destination auth")
             .contains(secret)
     );
@@ -101,7 +101,7 @@ async fn explicitly_selected_credentials_import_without_entering_preview() {
             .contains(secret)
     );
     fs::write(
-        destination.join("auth.json"),
+        destination.join("moedex-auth.json"),
         r#"{"auth_mode":"apikey","OPENAI_API_KEY":"destination-secret"}"#,
     )
     .expect("destination auth");
@@ -117,6 +117,7 @@ async fn explicitly_selected_credentials_import_without_entering_preview() {
     )
     .await
     .expect("conflict preview");
+    assert!(preview.items[0].conflict);
     let report = apply_codex_import(&preview.id, preview.selection)
         .await
         .expect("conflict apply");
@@ -125,10 +126,98 @@ async fn explicitly_selected_credentials_import_without_entering_preview() {
         ImportDisposition::SkippedConflict
     );
     assert!(
-        fs::read_to_string(destination.join("auth.json"))
+        fs::read_to_string(destination.join("moedex-auth.json"))
             .expect("destination auth")
             .contains("destination-secret")
     );
+}
+
+#[tokio::test]
+async fn credential_apply_rejects_a_source_change_after_preview_without_mutation() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(&source).expect("source");
+    fs::create_dir_all(&destination).expect("destination");
+    fs::write(
+        source.join("auth.json"),
+        r#"{"auth_mode":"apikey","OPENAI_API_KEY":"previewed-secret"}"#,
+    )
+    .expect("source auth");
+    let selection = CodexImportSelection {
+        settings: false,
+        sessions: false,
+        credentials: true,
+        conflict_policy: ConflictPolicy::Skip,
+    };
+    let preview = preview_codex_import(abs(&source), abs(&destination), selection)
+        .await
+        .expect("preview");
+
+    fs::write(
+        source.join("auth.json"),
+        r#"{"auth_mode":"apikey","OPENAI_API_KEY":"changed-secret"}"#,
+    )
+    .expect("changed source auth");
+    let error = apply_codex_import(&preview.id, preview.selection.clone())
+        .await
+        .expect_err("changed source must require a new preview");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("source credentials changed"));
+    assert!(!destination.join("moedex-auth.json").exists());
+    assert!(!format!("{error:?}").contains("previewed-secret"));
+    assert!(!format!("{error:?}").contains("changed-secret"));
+    let expired = apply_codex_import(&preview.id, preview.selection)
+        .await
+        .expect_err("changed source invalidates the preview");
+    assert_eq!(expired.kind(), std::io::ErrorKind::NotFound);
+}
+
+#[tokio::test]
+async fn credential_apply_rejects_a_destination_change_after_preview_without_mutation() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(&source).expect("source");
+    fs::create_dir_all(&destination).expect("destination");
+    fs::write(
+        source.join("auth.json"),
+        r#"{"auth_mode":"apikey","OPENAI_API_KEY":"source-secret"}"#,
+    )
+    .expect("source auth");
+    let selection = CodexImportSelection {
+        settings: false,
+        sessions: false,
+        credentials: true,
+        conflict_policy: ConflictPolicy::Skip,
+    };
+    let preview = preview_codex_import(abs(&source), abs(&destination), selection)
+        .await
+        .expect("preview");
+    let destination_bytes = br#"{"auth_mode":"apikey","OPENAI_API_KEY":"destination-secret"}"#;
+    fs::write(destination.join("moedex-auth.json"), destination_bytes)
+        .expect("changed destination auth");
+
+    let error = apply_codex_import(&preview.id, preview.selection.clone())
+        .await
+        .expect_err("changed destination must require a new preview");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(
+        error
+            .to_string()
+            .contains("destination credentials changed")
+    );
+    assert_eq!(
+        fs::read(destination.join("moedex-auth.json")).expect("destination auth"),
+        destination_bytes
+    );
+    assert!(!format!("{error:?}").contains("destination-secret"));
+    let expired = apply_codex_import(&preview.id, preview.selection)
+        .await
+        .expect_err("changed destination invalidates the preview");
+    assert_eq!(expired.kind(), std::io::ErrorKind::NotFound);
 }
 
 #[tokio::test]
@@ -162,7 +251,7 @@ async fn missing_or_invalid_credentials_report_sign_in_required() {
         report.items[0].disposition,
         ImportDisposition::SignInRequired
     );
-    assert!(!destination.join("auth.json").exists());
+    assert!(!destination.join("moedex-auth.json").exists());
 }
 
 #[tokio::test]
@@ -197,7 +286,7 @@ async fn ambiguous_auth_storage_config_fails_closed() {
         .await
         .expect("apply");
     assert_eq!(report.sign_in_required, 1);
-    assert!(!destination.join("auth.json").exists());
+    assert!(!destination.join("moedex-auth.json").exists());
 
     fs::remove_file(source.join("config.toml")).expect("remove invalid source config");
     fs::write(
@@ -212,7 +301,7 @@ async fn ambiguous_auth_storage_config_fails_closed() {
         .await
         .expect("apply");
     assert_eq!(report.failed, 1);
-    assert!(!destination.join("auth.json").exists());
+    assert!(!destination.join("moedex-auth.json").exists());
     assert!(
         fs::read_to_string(source.join("auth.json"))
             .expect("source auth")
@@ -906,6 +995,7 @@ fn preview_accumulation_rejects_before_retaining_an_over_limit_item() {
         source: None,
         payload: Some(vec![0]),
         thread_id: None,
+        credential: None,
     };
 
     let error = push_planned_item(&mut items, &mut stored_bytes, item)

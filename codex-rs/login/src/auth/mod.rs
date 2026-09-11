@@ -17,10 +17,14 @@ mod manager;
 mod revoke;
 
 pub use import::AuthImportOutcome;
+pub use import::AuthImportPreview;
 pub use import::AuthStorage;
 pub use import::AuthStorageNamespace;
 pub use import::import_auth_record;
+pub use import::import_auth_record_from_preview;
+pub use import::preview_auth_record;
 pub use import::replace_auth_record;
+pub use import::replace_auth_record_from_preview;
 
 pub use auth_headers::AuthHeaders;
 pub use bedrock_access_keys::BedrockAccessKeysAuth;

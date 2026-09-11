@@ -7,10 +7,12 @@ use crate::source::codex::RolloutDiscoveryLimits;
 use crate::source::codex::auth_storage_config;
 use crate::source::codex::discover_rollouts;
 use codex_login::AuthImportOutcome;
+use codex_login::AuthImportPreview;
 use codex_login::AuthStorage;
 use codex_login::AuthStorageNamespace;
-use codex_login::import_auth_record;
-use codex_login::replace_auth_record;
+use codex_login::import_auth_record_from_preview;
+use codex_login::preview_auth_record;
+use codex_login::replace_auth_record_from_preview;
 use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path::write_atomically as replace_text_atomically;
@@ -110,6 +112,17 @@ struct PlannedItem {
     source: Option<PathBuf>,
     payload: Option<Vec<u8>>,
     thread_id: Option<ThreadId>,
+    credential: Option<PlannedCredential>,
+}
+
+#[derive(Clone)]
+enum PlannedCredential {
+    Ready {
+        source: AuthStorage,
+        destination: AuthStorage,
+        preview: AuthImportPreview,
+    },
+    Unavailable(AuthImportOutcome),
 }
 
 #[derive(Clone)]
@@ -214,6 +227,7 @@ pub async fn preview_codex_import(
                     source: None,
                     payload: None,
                     thread_id: None,
+                    credential: None,
                 };
                 push_planned_item(&mut items, &mut stored_bytes, item)?;
                 continue;
@@ -235,6 +249,7 @@ pub async fn preview_codex_import(
                     source: None,
                     payload: None,
                     thread_id: Some(thread_id),
+                    credential: None,
                 };
                 push_planned_item(&mut items, &mut stored_bytes, item)?;
                 continue;
@@ -253,19 +268,7 @@ pub async fn preview_codex_import(
         }
     }
     if selection.credentials {
-        let item = PlannedItem {
-            preview: ImportPreviewItem {
-                kind: ImportItemKind::Credentials,
-                relative_path: PathBuf::from(AUTH_FILE),
-                source_sha256: None,
-                conflict: false,
-                requires_review: false,
-                review_reasons: Vec::new(),
-            },
-            source: None,
-            payload: None,
-            thread_id: None,
-        };
+        let item = planned_credential_import(&source, &destination)?;
         push_planned_item(&mut items, &mut stored_bytes, item)?;
     }
 
@@ -356,13 +359,19 @@ pub async fn apply_codex_import(
 
     for item in plan.items {
         if item.preview.kind == ImportItemKind::Credentials {
-            apply_credential_import(
-                &source,
-                &destination,
+            let credential = item
+                .credential
+                .as_ref()
+                .ok_or_else(|| io::Error::other("credential import plan is incomplete"))?;
+            if let Err(error) = apply_credential_import(
+                credential,
                 &item.preview,
                 selection.conflict_policy,
                 &mut report,
-            );
+            ) {
+                let _ = cancel_codex_import(preview_id);
+                return Err(error);
+            }
             continue;
         }
         let Some(payload) = item.payload else {
@@ -469,24 +478,62 @@ pub async fn apply_codex_import(
 }
 
 fn apply_credential_import(
-    source_home: &Path,
-    destination_home: &Path,
+    credential: &PlannedCredential,
     preview: &ImportPreviewItem,
     conflict_policy: ConflictPolicy,
     report: &mut ImportReport,
-) {
+) -> io::Result<()> {
+    let outcome = match credential {
+        PlannedCredential::Ready {
+            source,
+            destination,
+            preview,
+        } => match conflict_policy {
+            ConflictPolicy::Skip => import_auth_record_from_preview(source, destination, preview),
+            ConflictPolicy::ReplaceWithBackup => {
+                replace_auth_record_from_preview(source, destination, preview)
+            }
+        }?,
+        PlannedCredential::Unavailable(outcome) => *outcome,
+    };
+    record_auth_import_outcome(report, preview, outcome);
+    Ok(())
+}
+
+fn planned_credential_import(
+    source_home: &Path,
+    destination_home: &Path,
+) -> io::Result<PlannedItem> {
+    let unavailable = |outcome, reason: &str| PlannedItem {
+        preview: ImportPreviewItem {
+            kind: ImportItemKind::Credentials,
+            relative_path: PathBuf::from(AUTH_FILE),
+            source_sha256: None,
+            conflict: false,
+            requires_review: true,
+            review_reasons: vec![reason.to_string()],
+        },
+        source: None,
+        payload: None,
+        thread_id: None,
+        credential: Some(PlannedCredential::Unavailable(outcome)),
+    };
     let source_config = match auth_storage_config(source_home) {
         Ok(config) => config,
         Err(_) => {
-            record_auth_import_outcome(report, preview, AuthImportOutcome::SignInRequired);
-            return;
+            return Ok(unavailable(
+                AuthImportOutcome::SignInRequired,
+                "source credentials require a fresh sign-in",
+            ));
         }
     };
     let destination_config = match auth_storage_config(destination_home) {
         Ok(config) => config,
         Err(_) => {
-            record_auth_import_outcome(report, preview, AuthImportOutcome::Failed);
-            return;
+            return Ok(unavailable(
+                AuthImportOutcome::Failed,
+                "credential destination is unavailable",
+            ));
         }
     };
     let source = AuthStorage::new(
@@ -501,12 +548,38 @@ fn apply_credential_import(
         destination_config.keyring_backend,
         AuthStorageNamespace::Moedex,
     );
-    let outcome = match conflict_policy {
-        ConflictPolicy::Skip => import_auth_record(&source, &destination),
-        ConflictPolicy::ReplaceWithBackup => replace_auth_record(&source, &destination),
+    let credential_preview = preview_auth_record(&source, &destination)?;
+    let conflict = credential_preview.destination_has_credentials();
+    let mut review_reasons = Vec::new();
+    if conflict {
+        review_reasons.push("destination credentials already exist".to_string());
     }
-    .unwrap_or(AuthImportOutcome::Failed);
-    record_auth_import_outcome(report, preview, outcome);
+    if credential_preview.destination_is_unavailable() {
+        review_reasons.push("destination credential state is unavailable".to_string());
+    }
+    if credential_preview.source_is_unavailable() {
+        review_reasons.push("source credential state is unavailable".to_string());
+    } else if credential_preview.source_requires_sign_in() {
+        review_reasons.push("source credentials require a fresh sign-in".to_string());
+    }
+    Ok(PlannedItem {
+        preview: ImportPreviewItem {
+            kind: ImportItemKind::Credentials,
+            relative_path: PathBuf::from(AUTH_FILE),
+            source_sha256: None,
+            conflict,
+            requires_review: !review_reasons.is_empty(),
+            review_reasons,
+        },
+        source: None,
+        payload: None,
+        thread_id: None,
+        credential: Some(PlannedCredential::Ready {
+            source,
+            destination,
+            preview: credential_preview,
+        }),
+    })
 }
 
 fn record_auth_import_outcome(
@@ -587,6 +660,7 @@ fn planned_snapshot(
         source: Some(snapshot.path),
         payload: Some(payload),
         thread_id,
+        credential: None,
     })
 }
 

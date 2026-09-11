@@ -462,11 +462,12 @@ fn file_storage_delete_removes_auth_file() -> anyhow::Result<()> {
         AuthKeyringBackendKind::default(),
     );
     storage.save(&auth_dot_json)?;
-    assert!(dir.path().join("auth.json").exists());
-    let storage = FileAuthStorage::new(dir.path().to_path_buf());
+    assert!(dir.path().join("moedex-auth.json").exists());
+    let storage =
+        FileAuthStorage::new_in_namespace(dir.path().to_path_buf(), AuthStorageNamespace::Moedex);
     let removed = storage.delete()?;
     assert!(removed);
-    assert!(!dir.path().join("auth.json").exists());
+    assert!(!dir.path().join("moedex-auth.json").exists());
     Ok(())
 }
 
@@ -497,7 +498,7 @@ fn ephemeral_storage_save_load_delete_is_in_memory_only() -> anyhow::Result<()> 
     assert!(removed);
     let loaded = storage.load()?;
     assert_eq!(None, loaded);
-    assert!(!get_auth_file(dir.path()).exists());
+    assert!(!get_auth_file_in_namespace(dir.path(), AuthStorageNamespace::Moedex).exists());
     Ok(())
 }
 
@@ -517,7 +518,7 @@ fn seed_secrets_backend_and_fallback_auth_file_for_delete(
         &CODEX_AUTH_SECRET_NAME,
         &serde_json::to_string(auth)?,
     )?;
-    let auth_file = get_auth_file(codex_home);
+    let auth_file = get_auth_file_in_namespace(codex_home, AuthStorageNamespace::Moedex);
     std::fs::write(&auth_file, "stale")?;
     Ok(auth_file)
 }
@@ -568,7 +569,7 @@ fn assert_keyring_saved_auth_and_removed_fallback(
         "secrets backend should persist an encryption passphrase in the keyring"
     );
     assert!(encrypted_auth_file(codex_home).exists());
-    let auth_file = get_auth_file(codex_home);
+    let auth_file = get_auth_file_in_namespace(codex_home, AuthStorageNamespace::Moedex);
     assert!(
         !auth_file.exists(),
         "fallback auth.json should be removed after keyring save"
@@ -675,7 +676,7 @@ fn direct_keyring_auth_storage_saves_legacy_keyring_entry() -> anyhow::Result<()
         codex_home.path().to_path_buf(),
         Arc::new(mock_keyring.clone()),
     );
-    let auth_file = get_auth_file(codex_home.path());
+    let auth_file = get_auth_file_in_namespace(codex_home.path(), AuthStorageNamespace::Moedex);
     std::fs::write(&auth_file, "stale")?;
     let auth = auth_with_prefix("direct");
 
@@ -705,7 +706,7 @@ fn direct_keyring_auth_storage_delete_removes_keyring_and_file() -> anyhow::Resu
     );
     let auth = auth_with_prefix("direct-delete");
     storage.save(&auth)?;
-    let auth_file = get_auth_file(codex_home.path());
+    let auth_file = get_auth_file_in_namespace(codex_home.path(), AuthStorageNamespace::Moedex);
     std::fs::write(&auth_file, "stale")?;
 
     let removed = storage.delete()?;
@@ -772,7 +773,7 @@ fn secrets_keyring_auth_storage_save_persists_and_removes_fallback_file() -> any
         codex_home.path().to_path_buf(),
         Arc::new(mock_keyring.clone()),
     );
-    let auth_file = get_auth_file(codex_home.path());
+    let auth_file = get_auth_file_in_namespace(codex_home.path(), AuthStorageNamespace::Moedex);
     std::fs::write(&auth_file, "stale")?;
     let auth = AuthDotJson {
         auth_mode: Some(AuthMode::Chatgpt),
@@ -953,7 +954,7 @@ fn auto_auth_storage_save_falls_back_when_keyring_errors() -> anyhow::Result<()>
     let auth = auth_with_prefix("fallback");
     storage.save(&auth)?;
 
-    let auth_file = get_auth_file(codex_home.path());
+    let auth_file = get_auth_file_in_namespace(codex_home.path(), AuthStorageNamespace::Moedex);
     assert!(
         auth_file.exists(),
         "fallback auth.json should be created when keyring save fails"

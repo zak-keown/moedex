@@ -120,8 +120,8 @@ fn importing_file_auth_writes_only_the_destination_and_redacts_outcome() -> anyh
 }
 
 #[test]
-fn moedex_file_auth_in_a_shared_compatibility_home_never_touches_stock_auth()
--> anyhow::Result<()> {
+fn moedex_file_auth_in_a_shared_compatibility_home_never_touches_stock_auth() -> anyhow::Result<()>
+{
     let shared_home = tempdir()?;
     let stock = storage(
         shared_home.path(),
@@ -468,7 +468,7 @@ fn file_save_tightens_existing_destination_permissions() -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let destination_home = tempdir()?;
-    let destination_file = destination_home.path().join("auth.json");
+    let destination_file = destination_home.path().join("moedex-auth.json");
     fs::write(&destination_file, "{}")?;
     fs::set_permissions(&destination_file, fs::Permissions::from_mode(0o644))?;
     let destination = storage(

@@ -9,6 +9,8 @@ use codex_config::types::AuthKeyringBackendKind;
 use codex_keyring_store::DefaultKeyringStore;
 use codex_keyring_store::KeyringStore;
 use codex_protocol::auth::AuthMode;
+use sha2::Digest;
+use sha2::Sha256;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -26,10 +28,59 @@ pub enum AuthImportOutcome {
 ///
 /// The wrapped backend remains private so callers cannot serialize credentials
 /// into command arguments, reports, or staging files.
+#[derive(Clone)]
 pub struct AuthStorage {
     backend: Arc<dyn AuthStorageBackend>,
     home: PathBuf,
     mode: AuthCredentialsStoreMode,
+}
+
+/// Opaque credential state captured for a preview-bound import.
+///
+/// Credential material and its fingerprint remain private and this type deliberately does not
+/// implement `Debug` or serialization.
+#[derive(Clone, Eq, PartialEq)]
+pub struct AuthImportPreview {
+    source: AuthRecordState,
+    destination: AuthRecordState,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+enum AuthRecordState {
+    Empty,
+    Record {
+        fingerprint: [u8; 32],
+        importable: bool,
+    },
+    Unavailable,
+}
+
+impl AuthImportPreview {
+    /// Returns whether the destination already held a credential when previewed.
+    pub fn destination_has_credentials(&self) -> bool {
+        matches!(self.destination, AuthRecordState::Record { .. })
+    }
+
+    /// Returns whether source credential storage could not be inspected safely.
+    pub fn source_is_unavailable(&self) -> bool {
+        self.source == AuthRecordState::Unavailable
+    }
+
+    /// Returns whether destination credential storage could not be inspected safely.
+    pub fn destination_is_unavailable(&self) -> bool {
+        self.destination == AuthRecordState::Unavailable
+    }
+
+    /// Returns whether the previewed source record exists but cannot be imported offline.
+    pub fn source_requires_sign_in(&self) -> bool {
+        matches!(
+            self.source,
+            AuthRecordState::Record {
+                importable: false,
+                ..
+            }
+        )
+    }
 }
 
 impl std::fmt::Debug for AuthStorage {
@@ -100,7 +151,14 @@ pub fn import_auth_record(
     source: &AuthStorage,
     destination: &AuthStorage,
 ) -> std::io::Result<AuthImportOutcome> {
-    import_auth_record_with_replacement(source, destination, /*replace*/ false)
+    let preview = preview_auth_record(source, destination)?;
+    if preview.source_is_unavailable() {
+        return Ok(AuthImportOutcome::SignInRequired);
+    }
+    if preview.destination_is_unavailable() {
+        return Ok(AuthImportOutcome::Failed);
+    }
+    import_auth_record_from_preview(source, destination, &preview)
 }
 
 /// Attempts explicit replacement of an existing destination credential.
@@ -112,12 +170,62 @@ pub fn replace_auth_record(
     source: &AuthStorage,
     destination: &AuthStorage,
 ) -> std::io::Result<AuthImportOutcome> {
-    import_auth_record_with_replacement(source, destination, /*replace*/ true)
+    let preview = preview_auth_record(source, destination)?;
+    if preview.source_is_unavailable() {
+        return Ok(AuthImportOutcome::SignInRequired);
+    }
+    if preview.destination_is_unavailable() {
+        return Ok(AuthImportOutcome::Failed);
+    }
+    replace_auth_record_from_preview(source, destination, &preview)
 }
 
-fn import_auth_record_with_replacement(
+/// Captures source and destination credential state without exposing credential material.
+pub fn preview_auth_record(
     source: &AuthStorage,
     destination: &AuthStorage,
+) -> std::io::Result<AuthImportPreview> {
+    ensure_distinct_homes(&source.home, &destination.home)?;
+    Ok(AuthImportPreview {
+        source: read_auth_state(source)?.0,
+        destination: read_auth_state(destination)?.0,
+    })
+}
+
+/// Applies exactly the credential state represented by `preview`.
+///
+/// Any source or destination change requires a new preview and leaves the destination untouched.
+pub fn import_auth_record_from_preview(
+    source: &AuthStorage,
+    destination: &AuthStorage,
+    preview: &AuthImportPreview,
+) -> std::io::Result<AuthImportOutcome> {
+    import_auth_record_from_preview_with_replacement(
+        source,
+        destination,
+        preview,
+        /*replace*/ false,
+    )
+}
+
+/// Attempts preview-bound replacement of an existing destination credential.
+pub fn replace_auth_record_from_preview(
+    source: &AuthStorage,
+    destination: &AuthStorage,
+    preview: &AuthImportPreview,
+) -> std::io::Result<AuthImportOutcome> {
+    import_auth_record_from_preview_with_replacement(
+        source,
+        destination,
+        preview,
+        /*replace*/ true,
+    )
+}
+
+fn import_auth_record_from_preview_with_replacement(
+    source: &AuthStorage,
+    destination: &AuthStorage,
+    preview: &AuthImportPreview,
     replace: bool,
 ) -> std::io::Result<AuthImportOutcome> {
     ensure_distinct_homes(&source.home, &destination.home)?;
@@ -127,27 +235,73 @@ fn import_auth_record_with_replacement(
     if destination.mode == AuthCredentialsStoreMode::Ephemeral {
         return Ok(AuthImportOutcome::Failed);
     }
-    let record = match source.backend.load_for_import() {
-        Ok(Some(record)) => record,
-        Ok(None) => return Ok(AuthImportOutcome::Skipped),
-        Err(_) => return Ok(AuthImportOutcome::SignInRequired),
-    };
-    if !validate_importable_auth(&record) {
-        return Ok(AuthImportOutcome::SignInRequired);
+    let (source_state, source_record) = read_auth_state(source)?;
+    if source_state != preview.source {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "source credentials changed after preview; run preview again",
+        ));
     }
     let Ok(_guard) = codex_diagnostics::acquire_selected_home_write_guard(&destination.home) else {
         return Ok(AuthImportOutcome::Failed);
     };
-    match destination.backend.load_for_import() {
-        Ok(Some(_)) if replace => return Ok(AuthImportOutcome::SignInRequired),
-        Ok(Some(_)) => return Ok(AuthImportOutcome::Conflict),
-        Ok(None) => {}
-        Err(_) => return Ok(AuthImportOutcome::Failed),
+    let (destination_state, _) = read_auth_state(destination)?;
+    if destination_state != preview.destination {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "destination credentials changed after preview; run preview again",
+        ));
+    }
+    let record = match (source_state, source_record) {
+        (AuthRecordState::Unavailable, _) => return Ok(AuthImportOutcome::SignInRequired),
+        (AuthRecordState::Empty, _) => return Ok(AuthImportOutcome::Skipped),
+        (
+            AuthRecordState::Record {
+                importable: false, ..
+            },
+            _,
+        ) => return Ok(AuthImportOutcome::SignInRequired),
+        (AuthRecordState::Record { .. }, Some(record)) => record,
+        (AuthRecordState::Record { .. }, None) => {
+            return Err(std::io::Error::other(
+                "credential snapshot lost its source record",
+            ));
+        }
+    };
+    match destination_state {
+        AuthRecordState::Record { .. } if replace => {
+            return Ok(AuthImportOutcome::SignInRequired);
+        }
+        AuthRecordState::Record { .. } => return Ok(AuthImportOutcome::Conflict),
+        AuthRecordState::Unavailable => return Ok(AuthImportOutcome::Failed),
+        AuthRecordState::Empty => {}
     }
     match destination.backend.save(&record) {
         Ok(()) => Ok(AuthImportOutcome::Imported),
         Err(_) => Ok(AuthImportOutcome::Failed),
     }
+}
+
+fn read_auth_state(
+    storage: &AuthStorage,
+) -> std::io::Result<(AuthRecordState, Option<AuthDotJson>)> {
+    let record = match storage.backend.load_for_import() {
+        Ok(record) => record,
+        Err(_) => return Ok((AuthRecordState::Unavailable, None)),
+    };
+    let Some(record) = record else {
+        return Ok((AuthRecordState::Empty, None));
+    };
+    let serialized = serde_json::to_vec(&record).map_err(std::io::Error::other)?;
+    let fingerprint: [u8; 32] = Sha256::digest(&serialized).into();
+    let importable = validate_importable_auth(&record);
+    Ok((
+        AuthRecordState::Record {
+            fingerprint,
+            importable,
+        },
+        Some(record),
+    ))
 }
 
 fn ensure_distinct_homes(
