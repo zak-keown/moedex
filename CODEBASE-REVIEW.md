@@ -17,9 +17,9 @@ status: issues_found
 dispositions:
   fixed: 1
   stale: 0
-  skipped: 0
+  skipped: 1
   deferred: 0
-  open: 259
+  open: 258
 ---
 
 # Codebase Review — moedex
@@ -112,6 +112,10 @@ Net effect: any time a periodic/startup remote-plugin sync (`sync_remote_install
 
 Fix: `remove_old_plugin_versions` (and the whole-`target_root`-replacement branch in `replace_plugin_root_atomically`) should preserve any directory equal to `DEFAULT_PLUGIN_VERSION`, matching the exclusion already applied for trust purposes in `script_attribution.rs`.
 
+**Disposition:** skipped
+**Commit:** —
+**Resolved:** 2026-09-11
+**Note:** Report's blanket fix (preserve any DEFAULT_PLUGIN_VERSION dir) breaks intended, tested behavior: 'local' is the fallback version for any version-less install, and refresh_curated/non_curated_plugin_cache are DESIGNED to upgrade that placeholder to the real numbered version — asserted by manager_tests.rs refresh_curated_plugin_cache_replaces_existing_local_version_with_short_sha_version and refresh_non_curated_..._with_manifest_version. My fix made a red test green but turned those two passing intent-encoding tests red. Distinguishing a deliberate developer override from the version-less placeholder is a product decision, not a mechanical fix — needs maintainer input. Attempted fix + tests reverted (store.rs, store_tests.rs). See task-observer obs 0002.
 ### CR-003: SanitizedGitUrl leaves embedded credentials unredacted for SCP-style remotes with a second `@`
 
 **File:** `codex-rs/protocol/src/sanitized_git_url.rs`
