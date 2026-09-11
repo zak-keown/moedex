@@ -53,6 +53,18 @@ impl TraceWebSocket {
             .with_context(|| {
                 format!("invalid --otel-trace-listen URL '{listen_url}'; expected 'ws://IP:PORT'")
             })?;
+        // The trace websocket has no authentication and broadcasts every OTLP
+        // trace batch to any connected client. The Origin-header rejection only
+        // stops browser-originated cross-site connections, not a direct TCP
+        // client. So, like `app-server-transport`'s acceptor, refuse to expose
+        // it on a non-loopback address rather than serving an unauthenticated,
+        // unfiltered trace feed to anything that can reach the port.
+        if !bind_address.ip().is_loopback() {
+            return Err(anyhow::anyhow!(
+                "refusing to bind OTEL trace websocket to non-loopback address {bind_address}: \
+                 the trace websocket is unauthenticated, so only loopback listeners are allowed"
+            ));
+        }
         let websocket_listener = TcpListener::bind(bind_address)
             .await
             .with_context(|| format!("failed to bind OTEL trace websocket to {bind_address}"))?;
@@ -175,5 +187,30 @@ async fn stream_trace_batches(stream: WebSocket, sender: broadcast::Sender<Vec<u
                 Err(broadcast::error::RecvError::Closed) => break,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn refuses_to_bind_non_loopback_listener() {
+        let result = TraceWebSocket::start("ws://0.0.0.0:0").await;
+        let err = result
+            .err()
+            .expect("non-loopback bind must be refused");
+        assert!(
+            err.to_string().contains("non-loopback"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn binds_loopback_listener() {
+        let server = TraceWebSocket::start("ws://127.0.0.1:0")
+            .await
+            .expect("loopback bind should succeed");
+        assert!(server.listen_addr().ip().is_loopback());
     }
 }
