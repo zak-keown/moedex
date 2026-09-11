@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 18
+  fixed: 19
   stale: 0
   skipped: 2
   deferred: 3
-  open: 237
+  open: 236
 ---
 
 # Codebase Review — moedex
@@ -1064,6 +1064,10 @@ This is a real regression relative to an established pattern in the same codebas
 
 Fix: apply the same guard used in `app-server-transport` — refuse to bind (or require an explicit auth token) when the parsed `SocketAddr` is not loopback — rather than relying solely on the Origin-header check, which only defends against browser-originated connections.
 
+**Disposition:** fixed
+**Commit:** `45aa04c2c8`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-030: Concurrent secret writes silently lose updates due to missing file locking
 **File:** `codex-rs/secrets/src/local.rs`
 **Anchor:** `LocalSecretsBackend::set`
