@@ -18,8 +18,8 @@ dispositions:
   fixed: 22
   stale: 0
   skipped: 1
-  deferred: 4
-  open: 233
+  deferred: 5
+  open: 232
 ---
 
 # Codebase Review — moedex
@@ -549,6 +549,10 @@ runs on the dedicated V8 runtime thread without ever hitting an `await`/yield po
 
 Fix: implement timers with an in-process timer wheel/single reaper task (e.g., a `tokio::time` based scheduler or a bounded thread pool) instead of one OS thread per `setTimeout`, and/or cap the number of concurrently pending timeouts per cell.
 
+**Disposition:** deferred
+**Commit:** —
+**Resolved:** 2026-09-11
+**Note:** Premise verified in timers.rs::schedule_timeout: a fresh thread::spawn is created for every setTimeout with no cap on state.pending_timeouts and no shared timer/reaper; next_timeout_id only saturates at u64::MAX. Environment-blocked: the pinned v8 = "=150.4.0" crate with feature v8_enable_sandbox has no published prebuilt archive for aarch64-apple-darwin (build.rs download of librusty_v8_ptrcomp_sandbox_release_aarch64-apple-darwin.a.gz returns HTTP 404) and building from source needs gn (not installed) plus network, so code-mode-runtime will not even cargo check on this host — no runtime red test is possible and any edit would be unverifiable. Recommended fix: replace one-OS-thread-per-timeout with a shared in-process timer wheel / single reaper (e.g. tokio::time) and/or cap concurrently-pending timeouts per cell. Nothing touched.
 ### CR-013: Negotiated `max_heap_size_bytes` cell execution limit is silently discarded and never enforced
 
 **File:** `codex-rs/code-mode-runtime/src/service.rs`
