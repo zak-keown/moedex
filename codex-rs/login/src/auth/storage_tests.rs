@@ -145,32 +145,92 @@ fn unix_success_syncs_parent_after_plaintext_backup_removal() -> anyhow::Result<
 }
 
 #[test]
-fn windows_backup_cleanup_failure_abstraction_rolls_back_coherently() -> anyhow::Result<()> {
-    use std::cell::Cell;
-
+fn windows_atomic_replace_abstraction_commits_existing_target_without_residue() -> anyhow::Result<()>
+{
     let home = tempdir()?;
-    let target = home.path().join("auth.json");
-    let temp = home.path().join(".auth.json.test.tmp");
-    std::fs::write(&target, "original")?;
-    std::fs::write(&temp, "replacement")?;
-    let rejected_cleanup = Cell::new(false);
+    let storage = FileAuthStorage::new(home.path().into());
+    storage.save(&auth_with_prefix("original"))?;
+    let replacement = auth_with_prefix("replacement");
 
-    let error = replace_auth_file_windows_with_ops(
-        &temp,
-        &target,
-        |from, to| std::fs::rename(from, to),
-        |path| {
-            if path.to_string_lossy().contains("auth-backup") && !rejected_cleanup.replace(true) {
-                return Err(std::io::Error::other("injected backup cleanup failure"));
-            }
-            std::fs::remove_file(path)
-        },
-    )
-    .expect_err("cleanup failure must roll back");
+    storage.save_with_atomic_replace_for_test(&replacement, |temp, target| {
+        replace_auth_file_windows_with_ops(
+            temp,
+            target,
+            |_temp, _target| panic!("existing target must use atomic replacement"),
+            |target, replacement| std::fs::rename(replacement, target),
+        )
+    })?;
+
+    assert_eq!(storage.load()?, Some(replacement));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[test]
+fn windows_atomic_replace_abstraction_preserves_old_target_on_reported_failure()
+-> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    let original = auth_with_prefix("original");
+    storage.save(&original)?;
+
+    let error = storage
+        .save_with_atomic_replace_for_test(&auth_with_prefix("replacement"), |temp, target| {
+            replace_auth_file_windows_with_ops(
+                temp,
+                target,
+                |_temp, _target| panic!("existing target must use atomic replacement"),
+                |_target, _replacement| {
+                    Err(std::io::Error::other("injected atomic replacement failure"))
+                },
+            )
+        })
+        .expect_err("atomic replacement failure must propagate");
 
     assert_eq!(error.kind(), std::io::ErrorKind::Other);
-    assert!(rejected_cleanup.get());
-    assert_eq!(std::fs::read_to_string(target)?, "original");
+    assert_eq!(storage.load()?, Some(original));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[test]
+fn windows_initial_creation_abstraction_uses_same_volume_rename() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    let auth = auth_with_prefix("initial");
+
+    storage.save_with_atomic_replace_for_test(&auth, |temp, target| {
+        replace_auth_file_windows_with_ops(
+            temp,
+            target,
+            |temp, target| std::fs::rename(temp, target),
+            |_target, _replacement| panic!("missing target must use same-volume rename"),
+        )
+    })?;
+
+    assert_eq!(storage.load()?, Some(auth));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[test]
+fn windows_initial_creation_failure_removes_staged_credential() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+
+    let error = storage
+        .save_with_atomic_replace_for_test(&auth_with_prefix("initial"), |temp, target| {
+            replace_auth_file_windows_with_ops(
+                temp,
+                target,
+                |_temp, _target| Err(std::io::Error::other("injected creation failure")),
+                |_target, _replacement| panic!("missing target must use same-volume rename"),
+            )
+        })
+        .expect_err("creation failure must propagate");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    assert_eq!(storage.load()?, None);
     assert_eq!(auth_residue_count(home.path())?, 0);
     Ok(())
 }

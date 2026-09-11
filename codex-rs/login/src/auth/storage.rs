@@ -408,7 +408,7 @@ fn replace_auth_file(temp: &Path, target: &Path) -> std::io::Result<()> {
         temp,
         target,
         |from, to| std::fs::rename(from, to),
-        |path| std::fs::remove_file(path),
+        replace_existing_auth_file_windows,
     )
 }
 
@@ -416,39 +416,50 @@ fn replace_auth_file(temp: &Path, target: &Path) -> std::io::Result<()> {
 fn replace_auth_file_windows_with_ops(
     temp: &Path,
     target: &Path,
-    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
-    mut remove: impl FnMut(&Path) -> std::io::Result<()>,
+    create: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
-    if !target.exists() {
-        return rename(temp, target);
+    if target.exists() {
+        replace(target, temp)
+    } else {
+        create(temp, target)
     }
-    let sequence = AUTH_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let backup = target.with_extension(format!("auth-backup-{}-{sequence}", std::process::id()));
-    rename(target, &backup)?;
-    match rename(temp, target) {
-        Ok(()) => match remove(&backup) {
-            Ok(()) => Ok(()),
-            Err(cleanup_error) => {
-                if let Err(rollback_error) = rename(target, temp) {
-                    return match remove(&backup) {
-                        Ok(()) => Ok(()),
-                        Err(_) => Err(rollback_error),
-                    };
-                }
-                if let Err(restore_error) = rename(&backup, target) {
-                    return match rename(temp, target).and_then(|()| remove(&backup)) {
-                        Ok(()) => Ok(()),
-                        Err(_) => Err(restore_error),
-                    };
-                }
-                remove(temp)?;
-                Err(cleanup_error)
-            }
-        },
-        Err(error) => {
-            let _ = rename(&backup, target);
-            Err(error)
-        }
+}
+
+#[cfg(target_os = "windows")]
+fn replace_existing_auth_file_windows(target: &Path, replacement: &Path) -> std::io::Result<()> {
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+
+    let target = target
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    let replacement = replacement
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    // Do not ignore ACL merge errors: the restrictive replacement inherits the
+    // existing auth file's ACL only when ReplaceFileW can preserve it safely.
+    // SAFETY: both paths are NUL-terminated for the duration of the call. The
+    // optional backup, exclude, and reserved pointers are intentionally null.
+    let replaced = unsafe {
+        ReplaceFileW(
+            target.as_ptr(),
+            replacement.as_ptr(),
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if replaced == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 

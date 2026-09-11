@@ -3857,6 +3857,7 @@ dependencies = [
  "url",
  "urlencoding",
  "webbrowser",
+ "windows-sys 0.52.0",
  "wiremock",
 ]
 

@@ -44,6 +44,9 @@ url = { workspace = true }
 urlencoding = { workspace = true }
 webbrowser = { workspace = true }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 anyhow = { workspace = true }
 core_test_support = { workspace = true }
