@@ -18,8 +18,8 @@ dispositions:
   fixed: 22
   stale: 0
   skipped: 1
-  deferred: 5
-  open: 232
+  deferred: 6
+  open: 231
 ---
 
 # Codebase Review — moedex
@@ -579,6 +579,10 @@ So a client that opens a code-mode session and explicitly requests a memory boun
 
 Fix: either implement per-isolate heap limits (e.g. via `CreateParams` heap size fields / a near-heap-limit callback that triggers termination) and stop discarding the field, or reject/error out at session-open time when a caller requests `max_heap_size_bytes` that this runtime cannot honor, instead of silently accepting and ignoring it.
 
+**Disposition:** deferred
+**Commit:** —
+**Resolved:** 2026-09-11
+**Note:** Premise verified by grep: service.rs sets max_heap_size_bytes: None in BOTH InProcessCodeModeSession constructors (with_delegate_and_limits line 54, with_delegate_and_task_failure_handler line 71) via ..cell_execution_limits, and the field is never read again in code-mode-runtime (only max_yield_time_ms is consulted, line 206). Meanwhile code-mode/src/grpc_session/mod.rs reports the session as limited when the client set max_heap_size_bytes (line 112) and code-mode-host forwards the real limits struct, so a negotiated heap bound is silently dropped before reaching the isolate. Environment-blocked: the entire code-mode-* dependency tree pulls in the v8 crate (feature v8_enable_sandbox) whose prebuilt archive 404s for aarch64-apple-darwin and needs gn+network to build from source, so none of these crates compile or test on this host — no red test and no compile-verification possible. Recommended fix: implement a per-isolate heap limit (v8 CreateParams heap bounds + a near-heap-limit callback that terminates execution) and stop discarding the field, OR reject at session-open when a caller requests max_heap_size_bytes this runtime cannot honor instead of silently accepting it. Nothing touched.
 ### CR-014: `record_user_marketplace` silently deletes existing marketplaces stored as an inline table
 
 **File:** `codex-rs/config/src/marketplace_edit.rs`
