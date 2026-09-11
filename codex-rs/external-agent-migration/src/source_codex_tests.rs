@@ -976,14 +976,14 @@ fn destination_inventory_rejects_mutating_rollouts() {
 }
 
 #[test]
-fn destination_inventory_rejects_unparseable_rollouts() {
+fn destination_inventory_rejects_unparsable_rollouts() {
     let root = TempDir::new().expect("tempdir");
     let rollout = root.path().join("sessions/rollout.jsonl");
     fs::create_dir_all(rollout.parent().expect("parent")).expect("sessions");
     fs::write(&rollout, "not a rollout\n").expect("rollout");
 
     let error = destination_thread_ids(root.path())
-        .expect_err("unparseable destination rollout must block inventory");
+        .expect_err("unparsable destination rollout must block inventory");
 
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
 }

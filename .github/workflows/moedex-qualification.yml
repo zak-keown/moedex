@@ -68,6 +68,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: ./.github/actions/setup-ci
       - name: Identity, home, build, and diagnostics
         run: >-
@@ -90,6 +91,8 @@ jobs:
   package-and-installers:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      CODEX_REPO_ROOT: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
