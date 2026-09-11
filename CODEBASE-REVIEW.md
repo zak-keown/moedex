@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 24
+  fixed: 25
   stale: 0
   skipped: 1
   deferred: 6
-  open: 229
+  open: 228
 ---
 
 # Codebase Review — moedex
@@ -830,6 +830,10 @@ free of event payloads," and correspondingly logs only `"[realtime-text] realtim
 text output"` (no content) when routing handoff text. `handle_text` should follow the same
 pattern — log that text was appended (and perhaps its length) without the content itself.
 
+**Disposition:** fixed
+**Commit:** `b747ecfec1`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-022: Child-process environment (including inherited credentials) is logged verbatim at TRACE, and TRACE is the default-captured log level
 **File:** `codex-rs/core/src/spawn.rs`
 **Anchor:** `trace!("spawn_child_async: {program:?} {args:?} {arg0:?} {cwd:?} {network_sandbox_policy:?} {stdio_policy:?} {env:?}");`
