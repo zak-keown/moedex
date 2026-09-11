@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 8
+  fixed: 9
   stale: 0
   skipped: 1
   deferred: 0
-  open: 251
+  open: 250
 ---
 
 # Codebase Review — moedex
@@ -340,6 +340,10 @@ explicitly disabled.
 
 I confirmed the in-repo `app-server` request processor (`app-server/src/request_processors/catalog_processor.rs::skills_to_info`) does **not** use this `From` impl — it builds `codex_app_server_protocol::SkillMetadata` field-by-field and computes `enabled` from `disabled_paths`, so today's `skills/list` responses are correct. However, `codex-app-server-protocol` is a published protocol crate consumed outside this repo (e.g. by hosted/cloud integrations referenced throughout this codebase), and this `From` impl is the natural, discoverable conversion path for any such consumer. Because "enabled" is a security-relevant gating attribute (whether a skill may run), silently reporting `true` for a disabled skill is a defect that a reader would not expect: the fix is `enabled: value.enabled`.
 
+**Disposition:** fixed
+**Commit:** `83f0c51c04`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-009: Server request responses are not bound to the connection the request was sent to
 
 **File:** `codex-rs/app-server/src/outgoing_message.rs`
