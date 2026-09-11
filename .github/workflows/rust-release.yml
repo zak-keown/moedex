@@ -1581,6 +1581,11 @@ jobs:
         with:
           name: ${{ matrix.app_server_artifact }}-symbols
           path: package-artifacts
+      - name: Expose MSVC tools for symbol qualification
+        if: ${{ runner.os == 'Windows' }}
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: ${{ matrix.target }}
       - name: Exercise assembled archives with conflicting PATH
         working-directory: scripts/codex_package/smoke_tests
         shell: bash

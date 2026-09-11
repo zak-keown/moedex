@@ -84,6 +84,26 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertNotIn("id-token: write", build)
         self.assertNotIn("linux-code-sign", build)
 
+    def test_windows_package_qualification_exposes_dumpbin_before_smoke_tests(
+        self,
+    ) -> None:
+        unix = UNIX_WORKFLOW.read_text()
+        qualification = unix.split("\n  qualify-release-packages:\n", 1)[1].split(
+            "\n  stage-npm-packages:\n", 1
+        )[0]
+        setup_step = """      - name: Expose MSVC tools for symbol qualification
+        if: ${{ runner.os == 'Windows' }}
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: ${{ matrix.target }}
+"""
+
+        self.assertIn(setup_step, qualification)
+        self.assertLess(
+            qualification.index(setup_step),
+            qualification.index("Exercise assembled archives with conflicting PATH"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
