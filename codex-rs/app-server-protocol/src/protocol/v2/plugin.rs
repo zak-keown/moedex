@@ -988,7 +988,7 @@ impl From<CoreSkillMetadata> for SkillMetadata {
             dependencies: value.dependencies.map(SkillDependencies::from),
             path: value.path,
             scope: value.scope.into(),
-            enabled: true,
+            enabled: value.enabled,
             plugin_id: None,
         }
     }
@@ -1052,3 +1052,31 @@ impl From<CoreSkillScope> for SkillScope {
 /// Treat this as an invalidation signal and re-run `skills/list` with the
 /// client's current parameters when refreshed skill metadata is needed.
 pub struct SkillsChangedNotification {}
+
+#[cfg(test)]
+mod skill_metadata_conversion_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn from_core_skill_metadata_preserves_disabled_state() {
+        let core = CoreSkillMetadata {
+            name: "example".to_string(),
+            description: "desc".to_string(),
+            short_description: None,
+            interface: None,
+            dependencies: None,
+            path: AbsolutePathBuf::try_from(PathBuf::from("/tmp/example-skill")).unwrap(),
+            scope: codex_protocol::protocol::SkillScope::User,
+            enabled: false,
+        };
+
+        let wire: SkillMetadata = core.into();
+
+        assert!(
+            !wire.enabled,
+            "From<CoreSkillMetadata> must forward the source's `enabled` state, \
+             not hardcode `enabled = true`"
+        );
+    }
+}
