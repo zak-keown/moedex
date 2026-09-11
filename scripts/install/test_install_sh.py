@@ -17,6 +17,14 @@ MISMATCH_VERSION = "0.145.0"
 
 
 class InstallShTest(unittest.TestCase):
+    def test_install_never_offers_or_runs_stock_codex_uninstall(self) -> None:
+        script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertNotIn("Uninstall the existing", script)
+        self.assertNotIn("brew uninstall --cask codex", script)
+        self.assertNotIn("bun remove -g @openai/codex", script)
+        self.assertNotIn("npm uninstall -g @openai/codex", script)
+
     def test_uninstall_preserves_moedex_data_and_stock_codex(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -14,6 +14,13 @@ POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 
 @unittest.skipIf(POWERSHELL is None, "PowerShell is not installed")
 class InstallPs1Test(unittest.TestCase):
+    def test_install_never_offers_or_runs_stock_codex_uninstall(self) -> None:
+        script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertNotIn("Uninstall the existing", script)
+        self.assertNotIn('@("remove", "-g", "@openai/codex")', script)
+        self.assertNotIn('@("uninstall", "-g", "@openai/codex")', script)
+
     def test_parser_exposes_uninstall_switch(self) -> None:
         result = run_powershell(
             "if (-not (Get-Command $env:MOEDEX_TEST_INSTALLER).Parameters"

@@ -905,26 +905,7 @@ handle_conflicting_install() {
     return
   fi
 
-  case "$conflict_manager" in
-    brew)
-      uninstall_cmd="brew uninstall --cask codex"
-      ;;
-    bun)
-      uninstall_cmd="bun remove -g @openai/codex"
-      ;;
-    *)
-      uninstall_cmd="npm uninstall -g @openai/codex"
-      ;;
-  esac
-
-  if prompt_yes_no "Uninstall the existing $conflict_manager-managed Codex now?"; then
-    step "Running: $uninstall_cmd"
-    if ! sh -c "$uninstall_cmd"; then
-      warn "Failed to uninstall the existing $conflict_manager-managed Codex. Continuing with the standalone install."
-    fi
-  else
-    warn "Leaving the existing $conflict_manager-managed Codex installed. PATH order will determine which codex runs."
-  fi
+  warn "Leaving the existing $conflict_manager-managed Codex installed for coexistence. PATH order will determine which codex runs."
 }
 
 install_package_release() {

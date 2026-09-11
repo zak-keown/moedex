@@ -786,25 +786,7 @@ function Maybe-HandleConflictingInstall {
         return
     }
 
-    $manager = $Conflict.Manager
-
-    $uninstallArgs = if ($manager -eq "bun") {
-        @("remove", "-g", "@openai/codex")
-    } else {
-        @("uninstall", "-g", "@openai/codex")
-    }
-    $uninstallCommand = if ($manager -eq "bun") { "bun" } else { "npm" }
-
-    if (Prompt-YesNo "Uninstall the existing $manager-managed Codex now?") {
-        Write-Step "Running: $uninstallCommand $($uninstallArgs -join ' ')"
-        try {
-            & $uninstallCommand @uninstallArgs
-        } catch {
-            Write-WarningStep "Failed to uninstall the existing $manager-managed Codex. Continuing with the standalone install."
-        }
-    } else {
-        Write-WarningStep "Leaving the existing $manager-managed Codex installed. PATH order will determine which codex runs."
-    }
+    Write-WarningStep "Leaving the existing $($Conflict.Manager)-managed Codex installed for coexistence. PATH order will determine which codex runs."
 }
 
 function Test-VisibleCodexCommand {
