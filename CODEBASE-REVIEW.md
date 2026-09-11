@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 4
+  fixed: 5
   stale: 0
   skipped: 1
   deferred: 0
-  open: 255
+  open: 254
 ---
 
 # Codebase Review — moedex
@@ -262,6 +262,10 @@ Fix: remove the signal listener(s) before re-sending the signal to self (e.g.
 or simply compute and use `process.exit(128 + os signal number)` directly instead of relying on
 the OS default disposition.
 
+**Disposition:** fixed
+**Commit:** `15f6e6528b`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-007: `bigint` type declared for i64 fields that are serialized as plain JSON numbers, not strings
 **File:** `codex-rs/app-server-protocol/schema/typescript/v2/AccountTokenUsageSummary.ts`
 **Anchor:** `AccountTokenUsageSummary` (`lifetimeTokens: bigint | null, ...`); sibling `AccountTokenUsageDailyBucket.ts` (`tokens: bigint`)
