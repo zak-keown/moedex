@@ -253,7 +253,7 @@ async fn rejects_auth_without_a_nonempty_account_id() -> anyhow::Result<()> {
     for account_id in [None, Some(""), Some(" ")] {
         let home = tempfile::tempdir()?;
         std::fs::write(
-            home.path().join("auth.json"),
+            home.path().join("moedex-auth.json"),
             serde_json::to_vec(&json!({
                 "auth_mode": "chatgpt",
                 "tokens": {

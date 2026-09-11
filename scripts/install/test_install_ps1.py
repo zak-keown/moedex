@@ -92,14 +92,14 @@ class InstallPs1Test(unittest.TestCase):
 
 
 def create_installed_layout(home: Path, root: Path) -> tuple[Path, Path, Path]:
-    release = home / "packages" / "standalone" / "releases" / "test-release"
+    release = home / "packages" / "moedex" / "standalone" / "releases" / "test-release"
     release_bin = release / "bin"
     release_bin.mkdir(parents=True)
     (release_bin / "moedex.exe").write_text("moedex binary\n", encoding="utf-8")
     (release_bin / "codex-code-mode-host.exe").write_text(
         "code mode host\n", encoding="utf-8"
     )
-    standalone = home / "packages" / "standalone"
+    standalone = home / "packages" / "moedex" / "standalone"
     current = standalone / "current"
     create_directory_link(current, release)
     (standalone / "moedex-current-target").write_text(

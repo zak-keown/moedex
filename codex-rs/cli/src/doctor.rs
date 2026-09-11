@@ -33,6 +33,7 @@ use codex_api::ResponsesWebsocketClient;
 use codex_api::is_azure_responses_provider;
 use codex_arg0::Arg0DispatchPaths;
 use codex_build_info::BuildInfo;
+use codex_config::types::AuthCredentialsStoreMode;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
 use codex_core::config::Config;
@@ -1194,13 +1195,8 @@ fn config_toml_details(config: &Config, details: &mut Vec<String>) {
 }
 
 fn auth_check(config: &Config) -> DoctorCheck {
-    let mut details = Vec::new();
-    let auth_path = config.codex_home.join("auth.json");
-    details.push(format!(
-        "auth storage mode: {:?}",
-        config.cli_auth_credentials_store_mode
-    ));
-    details.push(format!("auth file: {}", auth_path.display()));
+    let mut details =
+        auth_storage_details(config.cli_auth_credentials_store_mode, &config.codex_home);
 
     let env_auth_vars = [
         OPENAI_API_KEY_ENV_VAR,
@@ -1283,7 +1279,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
             "auth.credentials",
             "auth",
             CheckStatus::Fail,
-            "no Codex credentials were found",
+            "no Moedex credentials were found",
         )
         .details(details)
         .remediation(format!(
@@ -1302,6 +1298,25 @@ fn auth_check(config: &Config) -> DoctorCheck {
             PRODUCT_IDENTITY.executable_name
         )),
     }
+}
+
+fn auth_storage_details(mode: AuthCredentialsStoreMode, home: &Path) -> Vec<String> {
+    let mut details = vec![format!("auth storage mode: {mode:?}")];
+    match mode {
+        AuthCredentialsStoreMode::File | AuthCredentialsStoreMode::Auto => {
+            details.push(format!(
+                "auth file: {}",
+                home.join("moedex-auth.json").display()
+            ));
+        }
+        AuthCredentialsStoreMode::Keyring => {
+            details.push("auth file: none (keyring storage)".to_string());
+        }
+        AuthCredentialsStoreMode::Ephemeral => {
+            details.push("auth file: none (ephemeral storage)".to_string());
+        }
+    }
+    details
 }
 
 fn provider_specific_auth_check(
@@ -3284,6 +3299,33 @@ mod tests {
         insta::assert_snapshot!("doctor_distribution_version_header", human);
         let json = serde_json::to_value(redacted_json_report(&report)).expect("serialize report");
         assert_eq!(json["codexVersion"], "1.2.3");
+    }
+
+    #[test]
+    fn auth_storage_details_report_only_moedex_owned_files() {
+        let home = Path::new("moedex-home");
+
+        assert_eq!(
+            auth_storage_details(AuthCredentialsStoreMode::File, home),
+            vec![
+                "auth storage mode: File".to_string(),
+                format!("auth file: {}", home.join("moedex-auth.json").display()),
+            ]
+        );
+        assert_eq!(
+            auth_storage_details(AuthCredentialsStoreMode::Keyring, home),
+            vec![
+                "auth storage mode: Keyring".to_string(),
+                "auth file: none (keyring storage)".to_string(),
+            ]
+        );
+        assert_eq!(
+            auth_storage_details(AuthCredentialsStoreMode::Ephemeral, home),
+            vec![
+                "auth storage mode: Ephemeral".to_string(),
+                "auth file: none (ephemeral storage)".to_string(),
+            ]
+        );
     }
 
     #[test]

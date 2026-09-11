@@ -86,7 +86,9 @@ async fn cancelling_installer_stops_children_and_releases_fallback_lock() {
     let home = tempfile::TempDir::new().expect("home");
     let ready = home.path().join("ready");
     let delayed = home.path().join("delayed");
-    let lock = home.path().join("packages/standalone/install.lock.d");
+    let lock = home
+        .path()
+        .join("packages/moedex/standalone/install.lock.d");
     let script = format!(
         "mkdir -p '{lock}'\necho $$ > '{lock}/pid'\n(trap '' TERM; echo ready > '{ready}'; sleep 4; echo late > '{delayed}') &\nwait\n",
         lock = lock.display(),
@@ -132,12 +134,15 @@ fn manual_update_daemon(home: &TempDir) -> (Daemon, String) {
         format!("{}-unknown-linux-musl", std::env::consts::ARCH)
     };
     let release = format!("1.0.0-{target}");
-    let standalone = home.path().join("packages/standalone");
-    let bin = standalone.join("releases").join(&release).join("codex");
+    let standalone = home.path().join("packages/moedex/standalone");
+    let bin = standalone
+        .join("releases")
+        .join(&release)
+        .join("bin/moedex");
     std::fs::create_dir_all(bin.parent().expect("binary parent")).expect("release directory");
     std::fs::write(
         &bin,
-        b"#!/bin/sh\nif [ \"$1\" = '--version' ]; then echo codex 1.0.0; else exec sleep 30; fi\n",
+        b"#!/bin/sh\nif [ \"$1\" = '--version' ]; then echo moedex 1.0.0; else exec sleep 30; fi\n",
     )
     .expect("managed binary");
     std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))
@@ -153,7 +158,7 @@ fn manual_update_daemon(home: &TempDir) -> (Daemon, String) {
             update_pid_file: state.join("app-server-updater.pid"),
             operation_lock_file: state.join("daemon.lock"),
             settings_file: state.join("settings.json"),
-            managed_codex_bin: standalone.join("current/codex"),
+            managed_codex_bin: standalone.join("current/bin/moedex"),
         },
         release,
     )
@@ -245,8 +250,11 @@ async fn manual_request_recovers_when_one_shot_updater_exits() {
     });
     // Without the marker, the ordinary startup path reports unsupported. A
     // retry that only waits for a successor would time out instead.
-    std::fs::remove_file(home.path().join("packages/standalone/auto-update-version"))
-        .expect("remove latest marker");
+    std::fs::remove_file(
+        home.path()
+            .join("packages/moedex/standalone/auto-update-version"),
+    )
+    .expect("remove latest marker");
     let result = tokio::time::timeout(
         Duration::from_secs(5),
         super::manual_update::request(&daemon),
@@ -283,8 +291,11 @@ async fn unsupported_request_preserves_updater_schedule() {
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    std::fs::remove_file(home.path().join("packages/standalone/auto-update-version"))
-        .expect("remove latest selection");
+    std::fs::remove_file(
+        home.path()
+            .join("packages/moedex/standalone/auto-update-version"),
+    )
+    .expect("remove latest selection");
     let mut malformed = codex_uds::UnixStream::connect(&socket_path)
         .await
         .expect("connect malformed request");
@@ -348,7 +359,7 @@ async fn manual_update_restarts_managed_daemon_with_automatic_updates_disabled()
                 .expect("initialize request")
                 .expect("frame");
             let version = if std::fs::read_to_string(
-                codex_home.join("packages/standalone/auto-update-version"),
+                codex_home.join("packages/moedex/standalone/auto-update-version"),
             )
             .expect("selected release")
             .starts_with("1.1.0")
@@ -383,11 +394,11 @@ async fn manual_update_restarts_managed_daemon_with_automatic_updates_disabled()
     };
     let before = current_pid();
     let next = release.replacen("1.0.0", "1.1.0", 1);
-    let standalone = home.path().join("packages/standalone");
+    let standalone = home.path().join("packages/moedex/standalone");
     let ready = home.path().join("installer-ready");
     let proceed = home.path().join("installer-proceed");
     let script = format!(
-        "#!/bin/sh\n# CODEX_INSTALL_IF_LATEST\ntest \"$CODEX_INSTALL_IF_LATEST\" = 1 || exit 4\nif [ \"$CODEX_UPDATE_FROM_RELEASE\" = '{next}' ]; then exit 0; fi\ntest \"$CODEX_UPDATE_FROM_RELEASE\" = '{release}' || exit 5\ntouch '{ready}'\nwhile [ ! -e '{proceed}' ]; do sleep .05; done\nmkdir -p '{root}/releases/{next}/bin'\nprintf '#!/bin/sh\\nif [ \"$1\" = --version ]; then echo codex 1.1.0; else exec sleep 30; fi\\n' > '{root}/releases/{next}/bin/codex'\nchmod +x '{root}/releases/{next}/bin/codex'\nln -sfn 'releases/{next}' '{root}/current'\nprintf '{next}' > '{root}/auto-update-version'\n",
+        "#!/bin/sh\n# MOEDEX_INSTALL_IF_LATEST\ntest \"$MOEDEX_INSTALL_IF_LATEST\" = 1 || exit 4\nif [ \"$MOEDEX_UPDATE_FROM_RELEASE\" = '{next}' ]; then exit 0; fi\ntest \"$MOEDEX_UPDATE_FROM_RELEASE\" = '{release}' || exit 5\ntouch '{ready}'\nwhile [ ! -e '{proceed}' ]; do sleep .05; done\nmkdir -p '{root}/releases/{next}/bin'\nprintf '#!/bin/sh\\nif [ \"$1\" = --version ]; then echo moedex 1.1.0; else exec sleep 30; fi\\n' > '{root}/releases/{next}/bin/moedex'\nchmod +x '{root}/releases/{next}/bin/moedex'\nln -sfn 'releases/{next}' '{root}/current'\nprintf '{next}' > '{root}/auto-update-version'\n",
         root = standalone.display(),
         ready = ready.display(),
         proceed = proceed.display(),
@@ -436,7 +447,7 @@ async fn manual_update_restarts_managed_daemon_with_automatic_updates_disabled()
     assert_eq!(output.running_version.as_deref(), Some("1.1.0"));
     assert_eq!(
         output.managed_codex_path,
-        standalone.join("current/bin/codex")
+        standalone.join("current/bin/moedex")
     );
     let restarted = current_pid();
     assert_ne!(restarted, before);
@@ -458,7 +469,7 @@ async fn manual_update_restarts_managed_daemon_with_automatic_updates_disabled()
         .expect("updater task")
         .expect("updater loop");
     let no_op = FakeInstallerHttp::new(InstallerResponse::Success(
-        b"#!/bin/sh\n# CODEX_INSTALL_IF_LATEST\nexit 0\n".to_vec(),
+        b"#!/bin/sh\n# MOEDEX_INSTALL_IF_LATEST\nexit 0\n".to_vec(),
     ));
     use std::io::Write;
     std::fs::OpenOptions::new()
@@ -491,7 +502,7 @@ async fn powershell_installer_is_noninteractive_and_reports_script_failure() {
     let valid = FakeInstallerHttp::new(InstallerResponse::Success(
         br#"
 function Test-Installer {
-    if ($env:CODEX_NON_INTERACTIVE -ne '1') { throw 'interactive installer' }
+    if ($env:MOEDEX_NON_INTERACTIVE -ne '1') { throw 'interactive installer' }
 }
 Test-Installer
 "#

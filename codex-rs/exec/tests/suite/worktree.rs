@@ -258,7 +258,7 @@ async fn worktree_start_and_fork_use_host_pool_and_preserve_legacy_resume() -> a
     // Synthetic enterprise claims let the cloud bundle, not a local project entry,
     // supply the source's distrust decision.
     fs::write(
-        home.join("auth.json"),
+        home.join("moedex-auth.json"),
         serde_json::to_vec(&serde_json::json!({
             "auth_mode": "chatgpt",
             "tokens": {

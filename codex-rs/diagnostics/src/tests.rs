@@ -135,3 +135,20 @@ fn daemon_guard_probes_but_does_not_retain_legacy_startup_lock() {
         .try_lock()
         .expect("legacy child can acquire startup lock while parent guard lives");
 }
+
+#[test]
+fn store_guard_creates_and_exclusively_holds_the_moedex_auth_lock() {
+    let home = tempfile::tempdir().expect("home");
+    let first = super::acquire_selected_home_write_guard(home.path()).expect("first guard");
+    let lock_path = home.path().join("moedex-auth.lock");
+
+    assert!(lock_path.is_file());
+    assert_eq!(
+        super::acquire_selected_home_write_guard(home.path())
+            .expect_err("second writer must be excluded")
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    drop(first);
+    super::acquire_selected_home_write_guard(home.path()).expect("released guard");
+}

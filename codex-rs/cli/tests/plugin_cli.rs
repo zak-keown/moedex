@@ -1860,7 +1860,7 @@ async fn remote_plugin_listing_uses_collection_when_remote_catalog_is_disabled()
         .success(&["plugin", "list", "-m", "local-only"])
         .await?;
     assert!(fixture.server.received_requests().await.unwrap().is_empty());
-    std::fs::remove_file(fixture.home.path().join("auth.json"))?;
+    std::fs::remove_file(fixture.home.path().join("moedex-auth.json"))?;
     let output = fixture.run(&["plugin", "list", "-m", MARKETPLACE]).await?;
     assert!(!output.status.success());
     assert!(String::from_utf8(output.stderr)?.contains("chatgpt authentication required"));

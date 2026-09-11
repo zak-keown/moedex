@@ -51,7 +51,7 @@ class InstallShTest(unittest.TestCase):
             self.assertEqual(installed.returncode, 0, installed.stderr)
             moedex_data = moedex_home / "history.jsonl"
             moedex_data.write_text("retained conversation\n", encoding="utf-8")
-            releases = moedex_home / "packages" / "standalone" / "releases"
+            releases = moedex_home / "packages" / "moedex" / "standalone" / "releases"
             self.assertTrue((root / "install-bin" / "moedex").is_symlink())
             (root / "requests.log").unlink()
 
@@ -73,7 +73,9 @@ class InstallShTest(unittest.TestCase):
                 (root / "install-bin" / "codex-code-mode-host").is_symlink()
             )
             self.assertFalse(
-                (moedex_home / "packages" / "standalone" / "current").exists()
+                (
+                    moedex_home / "packages" / "moedex" / "standalone" / "current"
+                ).exists()
             )
             self.assertTrue(any(releases.iterdir()))
             self.assertEqual(moedex_data.read_text(), "retained conversation\n")
@@ -109,6 +111,36 @@ class InstallShTest(unittest.TestCase):
             self.assertTrue((install_bin / "codex-code-mode-host").is_symlink())
             self.assertTrue(current.is_symlink())
             self.assertEqual(current.resolve(), release.resolve())
+
+    def test_install_in_shared_home_keeps_stock_current_pointer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            archive, checksum, metadata = create_package_release(root)
+            shared_home = root / "shared-home"
+            stock_release = (
+                shared_home / "packages" / "standalone" / "releases" / "stock"
+            )
+            stock_release.mkdir(parents=True)
+            stock_current = shared_home / "packages" / "standalone" / "current"
+            stock_current.symlink_to(stock_release)
+
+            result, _requests = run_installer_in(
+                root,
+                VERSION,
+                metadata_json=metadata,
+                archive_path=archive,
+                checksum_path=checksum,
+                force_macos=True,
+                codex_home=shared_home,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(stock_current.resolve(), stock_release.resolve())
+            moedex_current = (
+                shared_home / "packages" / "moedex" / "standalone" / "current"
+            )
+            self.assertTrue(moedex_current.is_symlink())
+            self.assertTrue((moedex_current / "bin" / "moedex").is_file())
 
     def test_moedex_home_alias_of_codex_home_never_removes_stock_current(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -259,7 +291,9 @@ class InstallShTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             install_bin = root / "install-bin"
-            current = root / "codex-home" / "packages" / "standalone" / "current"
+            current = (
+                root / "codex-home" / "packages" / "moedex" / "standalone" / "current"
+            )
             codex_path = install_bin / "moedex"
             host_path = install_bin / "codex-code-mode-host"
             self.assertEqual(os.readlink(codex_path), str(current / "bin" / "moedex"))
@@ -310,6 +344,7 @@ class InstallShTest(unittest.TestCase):
                 root
                 / "codex-home"
                 / "packages"
+                / "moedex"
                 / "standalone"
                 / "current"
                 / "bin"
@@ -341,7 +376,7 @@ class InstallShTest(unittest.TestCase):
                 checksum_path=checksum,
                 force_macos=True,
             )
-            marker = root / "codex-home/packages/standalone/auto-update-version"
+            marker = root / "codex-home/packages/moedex/standalone/auto-update-version"
             latest, _ = run_installer_in(root, "latest", **options)
             self.assertEqual(latest.returncode, 0, latest.stderr)
             release_name = f"{VERSION}-aarch64-apple-darwin"
@@ -351,9 +386,7 @@ class InstallShTest(unittest.TestCase):
             self.assertEqual(pinned.returncode, 0, pinned.stderr)
             self.assertFalse(marker.exists())
 
-            updater_record = (
-                root / "codex-home/app-server-daemon/app-server-updater.pid"
-            )
+            updater_record = root / "codex-home/moedex-daemon/app-server-updater.pid"
             updater_record.parent.mkdir(parents=True)
             updater_record.write_text(
                 json.dumps(
@@ -383,7 +416,7 @@ class InstallShTest(unittest.TestCase):
 
             managed = (
                 root
-                / f"codex-home/packages/standalone/releases/{release_name}/bin/moedex"
+                / f"codex-home/packages/moedex/standalone/releases/{release_name}/bin/moedex"
             )
             managed.unlink()
             guarded, _ = run_installer_in(
@@ -407,9 +440,7 @@ class InstallShTest(unittest.TestCase):
             )
             pinned, _ = run_installer_in(root, VERSION, **options)
             self.assertEqual(pinned.returncode, 0, pinned.stderr)
-            updater_record = (
-                root / "codex-home/app-server-daemon/app-server-updater.pid"
-            )
+            updater_record = root / "codex-home/moedex-daemon/app-server-updater.pid"
             updater_record.parent.mkdir(parents=True)
             updater_record.write_text(
                 json.dumps(
@@ -426,7 +457,9 @@ class InstallShTest(unittest.TestCase):
             )
             self.assertEqual(attempted.returncode, 0, attempted.stderr)
             self.assertFalse(
-                (root / "codex-home/packages/standalone/auto-update-version").exists()
+                (
+                    root / "codex-home/packages/moedex/standalone/auto-update-version"
+                ).exists()
             )
 
     def test_github_corrupt_checksum_fails_closed(self) -> None:

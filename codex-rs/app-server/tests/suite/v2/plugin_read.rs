@@ -1961,7 +1961,7 @@ async fn plugin_read_hides_apps_for_api_key_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_connectors_config(codex_home.path(), &server_url)?;
     std::fs::write(
-        codex_home.path().join("auth.json"),
+        codex_home.path().join("moedex-auth.json"),
         r#"{"OPENAI_API_KEY":"sk-test-key","tokens":null,"last_refresh":null}"#,
     )?;
 

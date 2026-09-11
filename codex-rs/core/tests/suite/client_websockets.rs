@@ -925,7 +925,7 @@ async fn responses_websocket_reconnects_after_account_switch() {
                 tokens.account_id = Some("second-account".into());
                 tokens.access_token = "second-account-token".into();
                 std::fs::write(
-                    harness.codex_home.path().join("auth.json"),
+                    harness.codex_home.path().join("moedex-auth.json"),
                     serde_json::to_vec(&json!({
                         "auth_mode": "chatgpt",
                         "tokens": tokens,

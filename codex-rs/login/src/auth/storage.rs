@@ -209,6 +209,21 @@ pub(super) trait AuthStorageBackend: Debug + Send + Sync {
     }
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()>;
     fn delete(&self) -> std::io::Result<bool>;
+    fn replace_with_backup(&self, _auth: &AuthDotJson) -> std::io::Result<String> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "credential replacement is unsupported for this storage backend",
+        ))
+    }
+}
+
+fn auth_backup_id() -> String {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = AUTH_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{timestamp}-{sequence}", std::process::id())
 }
 
 #[derive(Clone, Debug)]
@@ -416,6 +431,31 @@ impl AuthStorageBackend for FileAuthStorage {
 
     fn delete(&self) -> std::io::Result<bool> {
         delete_file_if_exists(&self.codex_home, self.namespace)
+    }
+
+    fn replace_with_backup(&self, auth: &AuthDotJson) -> std::io::Result<String> {
+        let current = self.load()?.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "credential destination is empty",
+            )
+        })?;
+        let backup_dir = self.codex_home.join("moedex-import-backups");
+        std::fs::create_dir_all(&backup_dir)?;
+        let backup = backup_dir.join(format!("moedex-auth-{}.json", auth_backup_id()));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options.open(&backup)?;
+        serde_json::to_writer_pretty(&mut file, &current).map_err(std::io::Error::other)?;
+        file.sync_all()?;
+        sync_parent_directory(&backup_dir)?;
+        if let Err(error) = self.save(auth) {
+            let _ = std::fs::remove_file(&backup);
+            return Err(error);
+        }
+        Ok(backup.display().to_string())
     }
 }
 
@@ -632,6 +672,29 @@ impl AuthStorageBackend for DirectKeyringAuthStorage {
         let file_removed = delete_file_if_exists(&self.codex_home, self.namespace)?;
         Ok(keyring_removed || file_removed)
     }
+
+    fn replace_with_backup(&self, auth: &AuthDotJson) -> std::io::Result<String> {
+        let key = compute_store_key(&self.codex_home)?;
+        let current = self.load()?.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "credential destination is empty",
+            )
+        })?;
+        let backup_key = format!("{key}|import-backup|{}", auth_backup_id());
+        let serialized = serde_json::to_string(&current).map_err(std::io::Error::other)?;
+        self.save_to_keyring(&backup_key, &serialized)?;
+        if let Err(error) = self.save(auth) {
+            let _ = self
+                .keyring_store
+                .delete(self.namespace.keyring_service(), &backup_key);
+            return Err(error);
+        }
+        Ok(format!(
+            "keyring:{}:{backup_key}",
+            self.namespace.keyring_service()
+        ))
+    }
 }
 
 #[derive(Clone)]
@@ -726,6 +789,31 @@ impl AuthStorageBackend for SecretsKeyringAuthStorage {
         let direct_removed = self.direct_storage.delete()?;
         Ok(keyring_removed || direct_removed)
     }
+
+    fn replace_with_backup(&self, auth: &AuthDotJson) -> std::io::Result<String> {
+        let current = self.load()?.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "credential destination is empty",
+            )
+        })?;
+        let backup_name = SecretName::new(&format!(
+            "MOEDEX_AUTH_IMPORT_BACKUP_{}",
+            auth_backup_id().replace('-', "_")
+        ))
+        .map_err(std::io::Error::other)?;
+        let serialized = serde_json::to_string(&current).map_err(std::io::Error::other)?;
+        self.secrets_manager
+            .set(&SecretScope::Global, &backup_name, &serialized)
+            .map_err(std::io::Error::other)?;
+        if let Err(error) = self.save(auth) {
+            let _ = self
+                .secrets_manager
+                .delete(&SecretScope::Global, &backup_name);
+            return Err(error);
+        }
+        Ok(format!("encrypted-store:{backup_name}"))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -787,6 +875,19 @@ impl AuthStorageBackend for AutoAuthStorage {
     fn delete(&self) -> std::io::Result<bool> {
         // Keyring storage will delete from disk as well
         self.keyring_storage.delete()
+    }
+
+    fn replace_with_backup(&self, auth: &AuthDotJson) -> std::io::Result<String> {
+        match self.keyring_storage.load() {
+            Ok(Some(_)) => self.keyring_storage.replace_with_backup(auth),
+            Ok(None) => self.file_storage.replace_with_backup(auth),
+            Err(_) => match self.file_storage.load()? {
+                Some(_) => self.file_storage.replace_with_backup(auth),
+                None => Err(std::io::Error::other(
+                    "credential destination is unavailable",
+                )),
+            },
+        }
     }
 }
 
@@ -877,6 +978,10 @@ impl AuthStorageBackend for GuardedAuthStorage {
     fn delete(&self) -> std::io::Result<bool> {
         let _guard = codex_diagnostics::acquire_selected_home_write_guard(&self.home)?;
         self.backend.delete()
+    }
+    fn replace_with_backup(&self, auth: &AuthDotJson) -> std::io::Result<String> {
+        let _guard = codex_diagnostics::acquire_selected_home_write_guard(&self.home)?;
+        self.backend.replace_with_backup(auth)
     }
 }
 

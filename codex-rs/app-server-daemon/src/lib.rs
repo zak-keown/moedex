@@ -285,7 +285,7 @@ fn ensure_supported_platform() -> Result<()> {
 #[cfg(not(any(unix, windows)))]
 fn ensure_supported_platform() -> Result<()> {
     Err(anyhow!(
-        "codex app-server daemon lifecycle is only supported on Unix and Windows platforms"
+        "moedex app-server daemon lifecycle is only supported on Unix and Windows platforms"
     ))
 }
 
@@ -325,7 +325,7 @@ impl Daemon {
             self.settings_file
                 .parent()
                 .and_then(Path::parent)
-                .context("daemon settings path has no Codex home")?,
+                .context("daemon settings path has no Moedex home")?,
         ))
     }
 
@@ -398,7 +398,7 @@ impl Daemon {
             && self.running_backend(&settings).await?.is_none()
         {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by moedex app-server daemon"
             ));
         }
         if !settings.auto_update_enabled {
@@ -499,7 +499,7 @@ impl Daemon {
             }
         } else if client::probe(&self.socket_path).await.is_ok() {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by moedex app-server daemon"
             ));
         } else {
             RestartIfRunningOutcome::NotRunning
@@ -535,7 +535,7 @@ impl Daemon {
 
         if client::probe(&self.socket_path).await.is_ok() {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by moedex app-server daemon"
             ));
         }
 
@@ -650,7 +650,7 @@ impl Daemon {
 
         if backend.is_none() && client::probe(&self.socket_path).await.is_ok() {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by moedex app-server daemon"
             ));
         }
 
@@ -722,7 +722,7 @@ impl Daemon {
             && self.running_backend(&settings).await?.is_none()
         {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by moedex app-server daemon"
             ));
         }
         settings.save(&self.settings_file).await?;
@@ -834,7 +834,7 @@ impl Daemon {
             .settings_file
             .parent()
             .and_then(Path::parent)
-            .context("daemon settings path has no Codex home")?;
+            .context("daemon settings path has no Moedex home")?;
         Ok(managed_install::is_stable_standalone_release(
             codex_home,
             &self.current_managed_codex_bin()?,
@@ -847,7 +847,7 @@ impl Daemon {
             .settings_file
             .parent()
             .and_then(Path::parent)
-            .context("daemon settings path has no Codex home")?;
+            .context("daemon settings path has no Moedex home")?;
         Ok(managed_install::managed_codex_bin(home))
     }
 
@@ -856,7 +856,7 @@ impl Daemon {
             .parent()
             .and_then(Path::parent)
             .is_some_and(|home| {
-                home.join("packages/standalone/auto-update-version")
+                home.join("packages/moedex/standalone/auto-update-version")
                     .is_file()
             })
     }
@@ -881,13 +881,13 @@ impl Daemon {
 
         let managed_codex_path = self.managed_codex_bin.display();
         let install_command = if cfg!(windows) {
-            "irm https://chatgpt.com/codex/install.ps1 | iex"
+            "irm https://github.com/zak-keown/moedex/releases/latest/download/install.ps1 | iex"
         } else {
-            "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+            "curl -fsSL https://github.com/zak-keown/moedex/releases/latest/download/install.sh | sh"
         };
         Err(anyhow!(
-            "managed standalone Codex install not found at {managed_codex_path}\n\n\
-             This command requires the standalone install managed by the Codex installer, because \
+            "managed standalone Moedex install not found at {managed_codex_path}\n\n\
+             This command requires the standalone install managed by the Moedex installer, because \
              the daemon starts and updates app-server from that fixed path.\n\n\
              Install it with:\n  {install_command}\n\n\
              Then rerun the command you just tried."
@@ -1339,8 +1339,8 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let home = TempDir::new().expect("home");
-        let standalone = home.path().join("packages/standalone");
-        let local_bin = standalone.join("local-main/bin/codex");
+        let standalone = home.path().join("packages/moedex/standalone");
+        let local_bin = standalone.join("local-main/bin/moedex");
         tokio::fs::create_dir_all(local_bin.parent().expect("bin parent"))
             .await
             .expect("local bin directory");
@@ -1360,7 +1360,7 @@ mod tests {
             update_pid_file: state.join("app-server-updater.pid"),
             operation_lock_file: state.join("daemon.lock"),
             settings_file: state.join("settings.json"),
-            managed_codex_bin: standalone.join("current/bin/codex"),
+            managed_codex_bin: standalone.join("current/bin/moedex"),
         };
         let settings = DaemonSettings::default();
         assert!(

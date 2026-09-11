@@ -28,6 +28,8 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -81,6 +83,7 @@ pub struct ImportReport {
     pub sign_in_required: usize,
     pub failed: usize,
     pub backups: Vec<PathBuf>,
+    pub credential_backups: Vec<String>,
     pub source_hashes: Vec<String>,
     pub items: Vec<ImportItemOutcome>,
 }
@@ -113,6 +116,14 @@ struct PlannedItem {
     payload: Option<Vec<u8>>,
     thread_id: Option<ThreadId>,
     credential: Option<PlannedCredential>,
+    destination_state: Option<DestinationState>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+enum DestinationState {
+    Missing,
+    File(String),
+    Other,
 }
 
 #[derive(Clone)]
@@ -229,6 +240,7 @@ pub async fn preview_codex_import(
                     payload: None,
                     thread_id: None,
                     credential: None,
+                    destination_state: None,
                 };
                 push_planned_item(&mut items, &mut stored_bytes, item)?;
                 continue;
@@ -251,6 +263,7 @@ pub async fn preview_codex_import(
                     payload: None,
                     thread_id: Some(thread_id),
                     credential: None,
+                    destination_state: None,
                 };
                 push_planned_item(&mut items, &mut stored_bytes, item)?;
                 continue;
@@ -338,11 +351,13 @@ pub async fn apply_codex_import(
     let plan = previews()
         .lock()
         .map_err(|_| io::Error::other("Codex import preview registry is unavailable"))?
-        .plans
-        .get(preview_id)
-        .cloned()
+        .remove(preview_id)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Codex import preview expired"))?;
     if plan.preview.selection != selection {
+        previews()
+            .lock()
+            .map_err(|_| io::Error::other("Codex import preview registry is unavailable"))?
+            .insert(preview_id.to_string(), plan);
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Codex import selection differs from its preview",
@@ -364,15 +379,12 @@ pub async fn apply_codex_import(
                 .credential
                 .as_ref()
                 .ok_or_else(|| io::Error::other("credential import plan is incomplete"))?;
-            if let Err(error) = apply_credential_import(
+            apply_credential_import(
                 credential,
                 &item.preview,
                 selection.conflict_policy,
                 &mut report,
-            ) {
-                let _ = cancel_codex_import(preview_id);
-                return Err(error);
-            }
+            )?;
             continue;
         }
         let Some(payload) = item.payload else {
@@ -401,6 +413,18 @@ pub async fn apply_codex_import(
         report.source_hashes.push(expected_hash.to_string());
         let target = destination.join(&item.preview.relative_path);
         ensure_target_beneath_home(&destination, &target)?;
+        let expected_destination = item.destination_state.as_ref().ok_or_else(|| {
+            io::Error::other("Codex import file plan has no destination snapshot")
+        })?;
+        if destination_state(&target)? != *expected_destination {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "destination changed after preview: {}",
+                    item.preview.relative_path.display()
+                ),
+            ));
+        }
         if let Some(thread_id) = item.thread_id {
             let destination_thread_ids = destination_thread_ids(&destination)?;
             if destination_thread_ids.contains(&thread_id) {
@@ -474,7 +498,6 @@ pub async fn apply_codex_import(
             None,
         ));
     }
-    cancel_codex_import(preview_id)?;
     Ok(report)
 }
 
@@ -495,7 +518,7 @@ fn apply_credential_import(
                 replace_auth_record_from_preview(source, destination, preview)
             }
         }?,
-        PlannedCredential::Unavailable(outcome) => *outcome,
+        PlannedCredential::Unavailable(outcome) => outcome.clone(),
     };
     record_auth_import_outcome(report, preview, outcome);
     Ok(())
@@ -518,6 +541,7 @@ fn planned_credential_import(
         payload: None,
         thread_id: None,
         credential: Some(PlannedCredential::Unavailable(outcome)),
+        destination_state: None,
     };
     let source_config = match auth_storage_config(source_home) {
         Ok(config) => config,
@@ -580,6 +604,7 @@ fn planned_credential_import(
             destination,
             preview: Box::new(credential_preview),
         }),
+        destination_state: None,
     })
 }
 
@@ -591,6 +616,11 @@ fn record_auth_import_outcome(
     let (disposition, reason) = match outcome {
         AuthImportOutcome::Imported => {
             report.imported = report.imported.saturating_add(1);
+            (ImportDisposition::Imported, None)
+        }
+        AuthImportOutcome::Replaced { backup } => {
+            report.imported = report.imported.saturating_add(1);
+            report.credential_backups.push(backup);
             (ImportDisposition::Imported, None)
         }
         AuthImportOutcome::Skipped => {
@@ -649,10 +679,12 @@ fn planned_snapshot(
             format!("Codex import item exceeds the {MAX_ITEM_BYTES}-byte limit"),
         ));
     }
+    let target = destination.join(&relative_path);
+    let destination_state = destination_state(&target)?;
     Ok(PlannedItem {
         preview: ImportPreviewItem {
             kind,
-            conflict: destination.join(&relative_path).exists(),
+            conflict: destination_state != DestinationState::Missing,
             relative_path,
             source_sha256: Some(snapshot.sha256),
             requires_review: !review_reasons.is_empty(),
@@ -662,7 +694,19 @@ fn planned_snapshot(
         payload: Some(payload),
         thread_id,
         credential: None,
+        destination_state: Some(destination_state),
     })
+}
+
+fn destination_state(path: &Path) -> io::Result<DestinationState> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            Ok(DestinationState::File(read_stable_snapshot(path)?.sha256))
+        }
+        Ok(_) => Ok(DestinationState::Other),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(DestinationState::Missing),
+        Err(error) => Err(error),
+    }
 }
 
 fn ensure_distinct_homes(source: &Path, destination: &Path) -> io::Result<()> {
@@ -923,10 +967,11 @@ fn write_atomic(path: &Path, payload: &[u8], suffix: &str) -> io::Result<()> {
     let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let process_id = std::process::id();
     let temp = path.with_file_name(format!(".{file_name}.{suffix}.{process_id}.{sequence}.tmp"));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temp)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(&temp)?;
     if let Err(error) = (|| {
         file.write_all(payload)?;
         file.sync_all()?;

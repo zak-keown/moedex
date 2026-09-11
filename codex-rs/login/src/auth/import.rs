@@ -15,9 +15,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Sanitized result of an explicit credential import.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AuthImportOutcome {
     Imported,
+    Replaced { backup: String },
     Conflict,
     SignInRequired,
     Skipped,
@@ -294,7 +295,10 @@ fn import_auth_record_from_preview_with_replacement(
     };
     match destination_state {
         AuthRecordState::Record { .. } if replace => {
-            return Ok(AuthImportOutcome::SignInRequired);
+            return match destination.backend.replace_with_backup(&record) {
+                Ok(backup) => Ok(AuthImportOutcome::Replaced { backup }),
+                Err(_) => Ok(AuthImportOutcome::Failed),
+            };
         }
         AuthRecordState::Record { .. } => return Ok(AuthImportOutcome::Conflict),
         AuthRecordState::Unavailable => return Ok(AuthImportOutcome::Failed),

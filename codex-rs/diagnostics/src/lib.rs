@@ -41,6 +41,32 @@ fn acquire_home_write_guard(
         tracing::warn!(path = %home.path.display(), source = ?home.source, "shared product home");
     }
     let mut guards = Vec::new();
+    if matches!(access, HomeAccess::Store) {
+        std::fs::create_dir_all(home.path.as_path())?;
+        let auth_lock_path = home.path.as_path().join("moedex-auth.lock");
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).truncate(false).read(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let auth_lock = options.open(&auth_lock_path)?;
+        if let Err(error) = auth_lock.try_lock() {
+            let kind = match error {
+                std::fs::TryLockError::WouldBlock => std::io::ErrorKind::WouldBlock,
+                std::fs::TryLockError::Error(error) => error.kind(),
+            };
+            return Err(std::io::Error::new(
+                kind,
+                format!(
+                    "Moedex credential store is busy: {}",
+                    auth_lock_path.display()
+                ),
+            ));
+        }
+        guards.push(auth_lock);
+    }
     for relative in [
         "app-server-daemon/daemon.lock",
         "app-server-control/app-server-startup.lock",

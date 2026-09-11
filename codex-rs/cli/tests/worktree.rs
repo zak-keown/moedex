@@ -392,7 +392,7 @@ trust_level = "trusted"
                 tokio::time::timeout(Duration::from_secs(/*secs*/ 10), spawned.exit_rx).await??;
             assert_ne!(exit, 0);
             assert!(output.contains("API key login is required"), "{output}");
-            assert!(!home.join("auth.json").exists());
+            assert!(!home.join("moedex-auth.json").exists());
             assert!(output.contains("The checkout was kept"), "{output}");
             continue;
         }

@@ -223,7 +223,7 @@ fn moedex_auto_fallback_in_a_shared_home_preserves_stock_auth() -> anyhow::Resul
 }
 
 #[test]
-fn file_conflict_skips_and_explicit_replace_requires_sign_in() -> anyhow::Result<()> {
+fn file_conflict_skips_and_explicit_replace_retains_a_private_backup() -> anyhow::Result<()> {
     let source_home = tempdir()?;
     let destination_home = tempdir()?;
     let source_auth = api_key_auth("source-secret");
@@ -246,11 +246,22 @@ fn file_conflict_skips_and_explicit_replace_requires_sign_in() -> anyhow::Result
         AuthImportOutcome::Conflict
     );
     assert_eq!(destination.read_for_test()?, Some(destination_auth.clone()));
+    let outcome = replace_auth_record(&source, &destination)?;
+    let AuthImportOutcome::Replaced { backup } = outcome else {
+        panic!("expected replacement with backup, got {outcome:?}");
+    };
+    assert_eq!(destination.read_for_test()?, Some(source_auth.clone()));
     assert_eq!(
-        replace_auth_record(&source, &destination)?,
-        AuthImportOutcome::SignInRequired
+        serde_json::from_slice::<AuthDotJson>(&fs::read(&backup)?)?,
+        destination_auth
     );
-    assert_eq!(destination.read_for_test()?, Some(destination_auth));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(&backup)?.permissions().mode() & 0o777, 0o600);
+    }
+    assert!(!backup.contains("source-secret"));
+    assert!(!backup.contains("destination-secret"));
     assert_eq!(source.read_for_test()?, Some(source_auth));
     Ok(())
 }
@@ -288,6 +299,30 @@ fn direct_keyring_import_uses_independent_services() -> anyhow::Result<()> {
     let destination_key = crate::auth::storage::compute_store_key(&destination_home)?;
     assert!(keyring.load("Codex Auth", &source_key)?.is_some());
     assert!(keyring.load("Moedex Auth", &destination_key)?.is_some());
+    let outcome = replace_auth_record(&source, &destination)?;
+    let AuthImportOutcome::Replaced { backup } = outcome else {
+        panic!("expected replacement with backup, got {outcome:?}");
+    };
+    assert!(backup.starts_with("keyring:Moedex Auth:"));
+    assert!(!backup.contains("direct-secret"));
+    assert!(!backup.contains("direct-destination"));
+    assert_eq!(
+        destination.read_for_test()?,
+        Some(api_key_auth("direct-secret"))
+    );
+    let backup_value = keyring
+        .0
+        .lock()
+        .expect("service keyring")
+        .iter()
+        .find_map(|((service, account), value)| {
+            (service == "Moedex Auth" && account.contains("|import-backup|")).then(|| value.clone())
+        })
+        .expect("destination backup");
+    assert_eq!(
+        serde_json::from_str::<AuthDotJson>(&backup_value)?,
+        api_key_auth("direct-destination")
+    );
     destination.delete_for_test()?;
     assert!(keyring.load("Codex Auth", &source_key)?.is_some());
     assert!(keyring.load("Moedex Auth", &destination_key)?.is_none());
@@ -312,7 +347,7 @@ fn encrypted_import_uses_independent_files_and_logout_isolated() -> anyhow::Resu
         &destination_home,
         AuthKeyringBackendKind::Secrets,
         AuthStorageNamespace::Moedex,
-        keyring,
+        keyring.clone(),
     );
     let original = api_key_auth("encrypted-secret");
     source.write_for_test(&original)?;
@@ -326,6 +361,33 @@ fn encrypted_import_uses_independent_files_and_logout_isolated() -> anyhow::Resu
     assert_eq!(destination.read_for_test()?, Some(destination_auth));
     assert!(source_home.join("secrets/codex_auth.age").is_file());
     assert!(destination_home.join("secrets/moedex_auth.age").is_file());
+    let outcome = replace_auth_record(&source, &destination)?;
+    let AuthImportOutcome::Replaced { backup } = outcome else {
+        panic!("expected replacement with backup, got {outcome:?}");
+    };
+    let backup_name = backup
+        .strip_prefix("encrypted-store:")
+        .expect("encrypted backup handle");
+    assert!(backup_name.starts_with("MOEDEX_AUTH_IMPORT_BACKUP_"));
+    assert!(!backup.contains("encrypted-secret"));
+    assert!(!backup.contains("encrypted-destination"));
+    assert_eq!(destination.read_for_test()?, Some(original.clone()));
+    let manager = codex_secrets::SecretsManager::new_with_keyring_store_and_namespace(
+        destination_home,
+        codex_secrets::SecretsBackendKind::Local,
+        keyring,
+        codex_secrets::LocalSecretsNamespace::MoedexAuth,
+    );
+    let backup_secret = manager
+        .get(
+            &codex_secrets::SecretScope::Global,
+            &codex_secrets::SecretName::new(backup_name)?,
+        )?
+        .expect("encrypted destination backup");
+    assert_eq!(
+        serde_json::from_str::<AuthDotJson>(&backup_secret)?,
+        api_key_auth("encrypted-destination")
+    );
     destination.delete_for_test()?;
     assert_eq!(source.read_for_test()?, Some(original));
     assert_eq!(destination.read_for_test()?, None);

@@ -25,12 +25,40 @@ EXPLICIT_PUBLIC_SURFACES = (
     "codex-rs/app-server/src/request_processors/thread_queue_processor.rs",
     "codex-rs/core/src/session_rollout_init_error.rs",
     "codex-rs/thread-store/src/local/rollout_lineage.rs",
+    "codex-rs/exec/src/lib.rs",
+    "codex-rs/codex-mcp/src/connection_manager/startup.rs",
+    "codex-rs/app-server-transport/src/transport/websocket.rs",
+    "codex-rs/app-server-daemon/README.md",
+    "codex-rs/app-server-test-client/README.md",
+    "codex-rs/exec-server/README.md",
+    "codex-rs/exec-server/src/environment_toml.rs",
+    "codex-rs/linux-sandbox/README.md",
+    "codex-rs/login/src/assets/error.html",
+    "codex-rs/responses-api-proxy/README.md",
+    "codex-rs/skills/src/assets/samples/openai-docs/references/mcp-diagnostics.md",
+    "codex-rs/skills/src/assets/samples/plugin-creator/SKILL.md",
+    "codex-rs/skills/src/assets/samples/plugin-creator/references/installing-and-updating.md",
+    ".github/ISSUE_TEMPLATE/3-cli.yml",
+    "scripts/debug-codex.sh",
+    "scripts/mcp_conformance/README.md",
+    "scripts/run_tui_with_exec_server.sh",
+    "scripts/start-codex-exec.sh",
+    "scripts/test-remote-env.sh",
 )
-TUI_PUBLIC_ROOTS = ("codex-rs/tui/src", "codex-rs/tui/assets")
+APPLICATION_PUBLIC_ROOTS = (
+    "codex-rs/tui/src",
+    "codex-rs/tui/assets",
+    "codex-rs/app-server-daemon/src",
+    "codex-rs/cloud-tasks/src",
+    "codex-rs/chatgpt/src",
+    "codex-rs/features/src",
+    "codex-rs/protocol/src",
+)
 BASE_FORBIDDEN = re.compile(
-    r"(?i)(?:\bcodex (?:app-server|archive|delete|doctor|fork|migrate-rollouts|queue|resume|sandbox|unarchive|agents)\b|"
-    r"\bCodex (?:config|home|keymap|couldn't start|rebuilt|detected|can rebuild|process|copies)\b|"
-    r"another Codex process|~[/\\]\.codex[/\\]config\.toml)"
+    r"(?i)(?:\bcodex (?:app-server|archive|cloud|delete|doctor|exec|fork|login|mcp|migrate-rollouts|plugin|queue|resume|sandbox|unarchive|agents)\b|"
+    r"\bCodex (?:config|home|keymap|login|couldn't start|rebuilt|detected|can rebuild|process|copies)\b|"
+    r"another Codex process|~[/\\]\.codex[/\\]config\.toml|"
+    r"--bin codex(?![-A-Za-z0-9_])|target[/\\]debug[/\\]codex(?![-A-Za-z0-9_]))"
 )
 TUI_FORBIDDEN = re.compile(
     r"(?i)(?:(?-i:\bcodex) (?:(?:app|mcp|resume|fork|exec|login|doctor|app-server)\b|"
@@ -44,6 +72,7 @@ TUI_FORBIDDEN = re.compile(
 TUI_ALLOWED = (
     re.compile(r"\bOpenAI Codex\b"),
     re.compile(r"\bCodex (?:extension|Cloud|Desktop|community forum)\b"),
+    re.compile(r"\bCodex MCP\b"),
     re.compile(r"\bCodex keymap documentation\b"),
     re.compile(r"\bCodex App (?:directives|avatar catalog)\b"),
     re.compile(r"\bCodex-optimized\b"),
@@ -65,7 +94,7 @@ def without_tui_allowances(line: str) -> str:
 
 def public_surfaces() -> list[Path]:
     surfaces = [REPO_ROOT / relative for relative in EXPLICIT_PUBLIC_SURFACES]
-    for relative_root in TUI_PUBLIC_ROOTS:
+    for relative_root in APPLICATION_PUBLIC_ROOTS:
         root = REPO_ROOT / relative_root
         surfaces.extend(
             path
@@ -129,14 +158,13 @@ class PublicBrandInventoryTest(unittest.TestCase):
         leaks: list[str] = []
         for path in public_surfaces():
             relative = path.relative_to(REPO_ROOT)
-            forbidden = (
-                tui_forbidden()
-                if str(relative).startswith("codex-rs/tui/")
-                else (BASE_FORBIDDEN,)
+            is_application_root = any(
+                str(relative).startswith(f"{root}/")
+                for root in APPLICATION_PUBLIC_ROOTS
             )
+            forbidden = tui_forbidden() if is_application_root else (BASE_FORBIDDEN,)
             for line_number, line in enumerate(production_lines(path), 1):
-                if str(relative).startswith("codex-rs/tui/"):
-                    line = without_tui_allowances(line)
+                line = without_tui_allowances(line)
                 for pattern in forbidden:
                     if match := pattern.search(line):
                         leaks.append(f"{relative}:{line_number}: {match.group(0)}")

@@ -19,7 +19,7 @@ async fn cloud_list_only_allows_trusted_credential_destinations() -> Result<()> 
         "cli_auth_credentials_store = 'file'\n",
     )?;
     std::fs::write(
-        codex_home.path().join("auth.json"),
+        codex_home.path().join("moedex-auth.json"),
         serde_json::to_vec(&json!({
             "auth_mode": "chatgpt",
             "tokens": {
@@ -85,7 +85,7 @@ async fn cloud_list_only_allows_trusted_credential_destinations() -> Result<()> 
         .args(["cloud", "list", "--limit", "1", "--json"])
         .assert()
         .failure()
-        .stderr(contains("Not signed in. Please run 'codex login'"));
+        .stderr(contains("Not signed in. Please run 'moedex login'"));
     auth_server.verify().await;
     Ok(())
 }

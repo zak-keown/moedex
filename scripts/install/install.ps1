@@ -23,6 +23,16 @@ $nonInteractiveValue = if (-not [string]::IsNullOrWhiteSpace($env:MOEDEX_NON_INT
 } else {
     $env:CODEX_NON_INTERACTIVE
 }
+$installIfLatest = if (-not [string]::IsNullOrWhiteSpace($env:MOEDEX_INSTALL_IF_LATEST)) {
+    $env:MOEDEX_INSTALL_IF_LATEST
+} else {
+    $env:CODEX_INSTALL_IF_LATEST
+}
+$updateFromRelease = if (-not [string]::IsNullOrWhiteSpace($env:MOEDEX_UPDATE_FROM_RELEASE)) {
+    $env:MOEDEX_UPDATE_FROM_RELEASE
+} else {
+    $env:CODEX_UPDATE_FROM_RELEASE
+}
 $NonInteractive = $nonInteractiveValue -match "^(?i:1|true|yes)$"
 $ReleasesAssetTimeoutSec = 300
 
@@ -889,7 +899,7 @@ function Uninstall-Moedex {
         [string]$CodexHome
     )
 
-    $standaloneRoot = Join-Path $MoedexHome "packages\standalone"
+    $standaloneRoot = Join-Path $MoedexHome "packages\moedex\standalone"
     $releasesDir = Join-Path $standaloneRoot "releases"
     $currentDir = Join-Path $standaloneRoot "current"
     $ownerMarker = Join-Path $standaloneRoot "moedex-current-target"
@@ -953,7 +963,7 @@ $codexHome = if (-not [string]::IsNullOrWhiteSpace($env:MOEDEX_HOME)) {
 } else {
     $env:CODEX_HOME
 }
-$standaloneRoot = Join-Path $codexHome "packages\standalone"
+$standaloneRoot = Join-Path $codexHome "packages\moedex\standalone"
 $releasesDir = Join-Path $standaloneRoot "releases"
 $currentDir = Join-Path $standaloneRoot "current"
 $autoUpdateVersion = Join-Path $standaloneRoot "auto-update-version"
@@ -1016,9 +1026,9 @@ $guardRejected = $false
 
 try {
     Invoke-WithInstallLock -LockPath $lockPath -Script {
-        $updaterRecord = Join-Path $codexHome "app-server-daemon\app-server-updater.pid"
+        $updaterRecord = Join-Path $codexHome "moedex-daemon\app-server-updater.pid"
         $oldUpdaterParent = $false
-        if ($Release -eq "latest" -and $env:CODEX_INSTALL_IF_LATEST -ne "1" -and (Test-Path -LiteralPath $updaterRecord)) {
+        if ($Release -eq "latest" -and $installIfLatest -ne "1" -and (Test-Path -LiteralPath $updaterRecord)) {
             $updaterPid = $null
             $updaterStartTime = $null
             try {
@@ -1046,11 +1056,11 @@ try {
                 }
             }
         }
-        if ($env:CODEX_INSTALL_IF_LATEST -eq "1" -or $oldUpdaterParent) {
+        if ($installIfLatest -eq "1" -or $oldUpdaterParent) {
             $previousRelease = if ($oldUpdaterParent -and (Test-Path -LiteralPath $autoUpdateVersion)) {
                 [System.IO.File]::ReadAllText($autoUpdateVersion)
             } else {
-                $env:CODEX_UPDATE_FROM_RELEASE
+                $updateFromRelease
             }
             $currentTarget = if (Test-Path -LiteralPath $currentDir) { (Get-Item -LiteralPath $currentDir).Target } else { $null }
             if ($Release -ne "latest" -or [string]::IsNullOrEmpty($previousRelease) -or [string]::IsNullOrEmpty($currentTarget) -or

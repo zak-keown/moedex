@@ -49,6 +49,109 @@ async fn preview_and_cancel_leave_both_homes_byte_identical() {
 }
 
 #[tokio::test]
+async fn apply_consumes_a_preview_before_mutating_destination() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(&source).expect("source");
+    fs::create_dir_all(&destination).expect("destination");
+    fs::write(source.join("config.toml"), "model = \"gpt-5\"\n").expect("config");
+    let selection = CodexImportSelection {
+        settings: true,
+        sessions: false,
+        credentials: false,
+        conflict_policy: ConflictPolicy::Skip,
+    };
+    let preview = preview_codex_import(abs(&source), abs(&destination), selection)
+        .await
+        .expect("preview");
+
+    let (first, second) = tokio::join!(
+        apply_codex_import(&preview.id, preview.selection.clone()),
+        apply_codex_import(&preview.id, preview.selection.clone()),
+    );
+    let results = [first, second];
+
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter_map(|result| result.as_ref().err())
+            .map(std::io::Error::kind)
+            .collect::<Vec<_>>(),
+        vec![std::io::ErrorKind::NotFound]
+    );
+}
+
+#[tokio::test]
+async fn apply_rejects_a_destination_created_after_preview() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(&source).expect("source");
+    fs::create_dir_all(&destination).expect("destination");
+    fs::write(source.join("config.toml"), "model = \"source\"\n").expect("source config");
+    let selection = CodexImportSelection {
+        settings: true,
+        sessions: false,
+        credentials: false,
+        conflict_policy: ConflictPolicy::ReplaceWithBackup,
+    };
+    let preview = preview_codex_import(abs(&source), abs(&destination), selection)
+        .await
+        .expect("preview");
+    fs::write(destination.join("config.toml"), "model = \"new-owner\"\n")
+        .expect("destination config");
+
+    let error = apply_codex_import(&preview.id, preview.selection)
+        .await
+        .expect_err("destination change must invalidate preview");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert_eq!(
+        fs::read_to_string(destination.join("config.toml")).expect("destination config"),
+        "model = \"new-owner\"\n"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn imported_sessions_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    let relative = PathBuf::from("sessions/2026/09/10/rollout-private.jsonl");
+    let rollout = source.join(&relative);
+    fs::create_dir_all(rollout.parent().expect("rollout parent")).expect("source sessions");
+    fs::create_dir_all(&destination).expect("destination");
+    fs::write(&rollout, valid_rollout_line(root.path())).expect("rollout");
+    let selection = CodexImportSelection {
+        settings: false,
+        sessions: true,
+        credentials: false,
+        conflict_policy: ConflictPolicy::Skip,
+    };
+    let preview = preview_codex_import(abs(&source), abs(&destination), selection)
+        .await
+        .expect("preview");
+
+    apply_codex_import(&preview.id, preview.selection)
+        .await
+        .expect("apply");
+
+    assert_eq!(
+        fs::metadata(destination.join(relative))
+            .expect("imported session")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+}
+
+#[tokio::test]
 async fn explicitly_selected_credentials_import_without_exposing_secret_in_public_preview() {
     let root = TempDir::new().expect("tempdir");
     let source = root.path().join("source");
@@ -128,6 +231,53 @@ async fn explicitly_selected_credentials_import_without_exposing_secret_in_publi
     assert!(
         fs::read_to_string(destination.join("moedex-auth.json"))
             .expect("destination auth")
+            .contains("destination-secret")
+    );
+}
+
+#[tokio::test]
+async fn credential_replacement_reports_a_non_secret_backup_handle() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(&source).expect("source");
+    fs::create_dir_all(&destination).expect("destination");
+    fs::write(
+        source.join("auth.json"),
+        r#"{"auth_mode":"apikey","OPENAI_API_KEY":"source-secret"}"#,
+    )
+    .expect("source auth");
+    fs::write(
+        destination.join("moedex-auth.json"),
+        r#"{"auth_mode":"apikey","OPENAI_API_KEY":"destination-secret"}"#,
+    )
+    .expect("destination auth");
+    let selection = CodexImportSelection {
+        settings: false,
+        sessions: false,
+        credentials: true,
+        conflict_policy: ConflictPolicy::ReplaceWithBackup,
+    };
+    let preview = preview_codex_import(abs(&source), abs(&destination), selection)
+        .await
+        .expect("preview");
+
+    let report = apply_codex_import(&preview.id, preview.selection)
+        .await
+        .expect("replace credentials");
+
+    assert_eq!(report.imported, 1);
+    assert_eq!(report.credential_backups.len(), 1);
+    assert!(!format!("{report:?}").contains("source-secret"));
+    assert!(!format!("{report:?}").contains("destination-secret"));
+    assert!(
+        fs::read_to_string(destination.join("moedex-auth.json"))
+            .expect("destination auth")
+            .contains("source-secret")
+    );
+    assert!(
+        fs::read_to_string(&report.credential_backups[0])
+            .expect("credential backup")
             .contains("destination-secret")
     );
 }
@@ -1039,6 +1189,7 @@ fn preview_accumulation_rejects_before_retaining_an_over_limit_item() {
         payload: Some(vec![0]),
         thread_id: None,
         credential: None,
+        destination_state: None,
     };
 
     let error = push_planned_item(&mut items, &mut stored_bytes, item)

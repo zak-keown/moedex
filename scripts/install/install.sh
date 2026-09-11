@@ -4,6 +4,8 @@ set -eu
 
 RELEASE="${MOEDEX_RELEASE:-${CODEX_RELEASE:-latest}}"
 NON_INTERACTIVE="${MOEDEX_NON_INTERACTIVE:-${CODEX_NON_INTERACTIVE:-false}}"
+INSTALL_IF_LATEST="${MOEDEX_INSTALL_IF_LATEST:-${CODEX_INSTALL_IF_LATEST:-}}"
+UPDATE_FROM_RELEASE="${MOEDEX_UPDATE_FROM_RELEASE:-${CODEX_UPDATE_FROM_RELEASE:-}}"
 ACTION="install"
 RELEASES_ASSET_TIMEOUT=300
 release_source="github"
@@ -12,7 +14,7 @@ BIN_DIR="${MOEDEX_INSTALL_DIR:-${CODEX_INSTALL_DIR:-$HOME/.local/bin}}"
 BIN_PATH="$BIN_DIR/moedex"
 CODE_MODE_HOST_BIN_PATH="$BIN_DIR/codex-code-mode-host"
 CODEX_HOME_DIR="${MOEDEX_HOME:-${CODEX_HOME:-$HOME/.moedex}}"
-STANDALONE_ROOT="$CODEX_HOME_DIR/packages/standalone"
+STANDALONE_ROOT="$CODEX_HOME_DIR/packages/moedex/standalone"
 RELEASES_DIR="$STANDALONE_ROOT/releases"
 CURRENT_LINK="$STANDALONE_ROOT/current"
 CURRENT_OWNER_MARKER="$STANDALONE_ROOT/moedex-current-target"
@@ -1145,9 +1147,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 acquire_install_lock
-updater_record="$CODEX_HOME_DIR/app-server-daemon/app-server-updater.pid"
+updater_record="$CODEX_HOME_DIR/moedex-daemon/app-server-updater.pid"
 old_updater_parent="false"
-if [ "${CODEX_INSTALL_IF_LATEST:-}" != "1" ] && [ -f "$updater_record" ]; then
+if [ "$INSTALL_IF_LATEST" != "1" ] && [ -f "$updater_record" ]; then
   updater_pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$updater_record" | head -n 1)"
   recorded_start="$(sed -n 's/.*"processStartTime"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$updater_record" | head -n 1)"
   if [ -r "/proc/$$/stat" ]; then
@@ -1171,8 +1173,8 @@ if [ "${CODEX_INSTALL_IF_LATEST:-}" != "1" ] && [ -f "$updater_record" ]; then
     exit 0
   fi
 fi
-if [ "${CODEX_INSTALL_IF_LATEST:-}" = "1" ] || [ "$old_updater_parent" = "true" ]; then
-  guarded_release="${CODEX_UPDATE_FROM_RELEASE:-}"
+if [ "$INSTALL_IF_LATEST" = "1" ] || [ "$old_updater_parent" = "true" ]; then
+  guarded_release="$UPDATE_FROM_RELEASE"
   if [ "$old_updater_parent" = "true" ]; then
     guarded_release="$(cat "$AUTO_UPDATE_VERSION" 2>/dev/null || true)"
   fi

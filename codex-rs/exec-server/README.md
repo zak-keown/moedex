@@ -1,17 +1,17 @@
 # codex-exec-server
 
-`codex-exec-server` is the library backing `codex exec-server`, a small
+`codex-exec-server` is the library backing `moedex exec-server`, a small
 JSON-RPC server for spawning and controlling subprocesses through
 `codex-utils-pty`.
 
 It provides:
 
-- a CLI entrypoint: `codex exec-server`
+- a CLI entrypoint: `moedex exec-server`
 - a Rust client: `ExecServerClient`
 - a small protocol module with shared request/response types
 
 This crate owns the transport, protocol, and filesystem/process handlers. The
-top-level `codex` binary owns hidden helper dispatch for sandboxed
+top-level `moedex` binary owns hidden helper dispatch for sandboxed
 filesystem operations and `codex-linux-sandbox`.
 
 ## Transport
@@ -38,7 +38,7 @@ Disconnecting either side closes its peer and resets the remote stream. The
 existing harness reconnect flow can then resume a retained destination session.
 The forwarder does not replay requests or persist execution state, so recovery
 is limited by the destination's session and process-output retention.
-It uses the standard Codex ChatGPT sign-in state; run `codex login` first when
+It uses the standard Moedex ChatGPT sign-in state; run `moedex login` first when
 remote registration needs authentication. Containerized callers that receive an
 Agent Identity JWT in `CODEX_ACCESS_TOKEN` can opt into that auth path with
 `--use-agent-identity-auth`; Codex then registers an Agent task and sends the
@@ -49,7 +49,7 @@ Codex sends it as a bearer token on the registration request. For example:
 
 ```sh
 CODEX_API_KEY="$OPENAI_API_KEY" \
-codex exec-server \
+moedex exec-server \
   --remote ... \
   --environment-id "$ENVIRONMENT_ID"
 ```
@@ -59,7 +59,7 @@ WebSocket handshake. Select the transport and authentication with executor
 arguments rather than `config.toml` settings:
 
 ```sh
-codex exec-server \
+moedex exec-server \
   --remote https://example.com \
   --environment-id "$ENVIRONMENT_ID" \
   --remote-transport direct \
@@ -436,7 +436,7 @@ callers must convert them to `file:` URIs before sending requests:
 
 Each filesystem request accepts an optional `sandbox` object. When `sandbox`
 contains a `ReadOnly` or `WorkspaceWrite` policy, the operation runs in a
-hidden helper process launched from the top-level `codex` executable and
+hidden helper process launched from the top-level `moedex` executable and
 prepared through the shared sandbox transform path. Helper requests and
 responses are passed over stdin/stdout.
 
@@ -474,12 +474,12 @@ The crate exports:
   registration mode
 
 Callers must pass `ExecServerRuntimePaths` and an explicitly configured
-`HttpClientFactory` to `run_main()`. The top-level `codex exec-server` command
-builds these paths from the `codex` arg0 dispatch state and resolves its HTTP
-client factory from the effective Codex configuration.
+`HttpClientFactory` to `run_main()`. The top-level `moedex exec-server` command
+builds these paths from the `moedex` arg0 dispatch state and resolves its HTTP
+client factory from the effective Moedex configuration.
 `RemoteEnvironmentConfig::new(...)` also takes the auth provider and HTTP client
 factory that remote registration mode should use; the CLI builds the auth
-provider from Codex auth state before starting remote mode.
+provider from Moedex auth state before starting remote mode.
 
 ## Example session
 
