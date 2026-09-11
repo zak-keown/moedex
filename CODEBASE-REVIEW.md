@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 3
+  fixed: 4
   stale: 0
   skipped: 1
   deferred: 0
-  open: 256
+  open: 255
 ---
 
 # Codebase Review — moedex
@@ -223,6 +223,10 @@ codex-rs/code-mode/Cargo.toml:
 
 This script is invoked unconditionally (no `continue-on-error`) as the "Verify codex-rs Cargo manifests inherit workspace settings" step in `.github/workflows/repo-checks.yml`, so this is a currently-broken, presumably-required CI check: any run of `repo-checks.yml` against the current default-branch tree fails on this step regardless of what the PR/push actually changes. Fix by removing the `"codex-rs/code-mode/Cargo.toml"` entry from `MANIFEST_FEATURE_EXCEPTIONS` (the `codex-rs/v8-poc/Cargo.toml` entry is still valid and matches its manifest).
 
+**Disposition:** fixed
+**Commit:** `449919a975`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-006: Signal-terminated child process causes the wrapper to exit 0 instead of the documented 128+n code
 **File:** `codex-cli/bin/codex.js`
 **Anchor:** `// Re-emit the same signal so that the parent terminates with the expected\n// semantics (this also sets the correct exit code of 128 + n).`
