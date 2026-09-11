@@ -197,7 +197,9 @@ impl App {
     }
 
     fn insert_pending_usage_output(&mut self, tui: &mut tui::Tui) {
-        if let Some(cell) = self.chat_widget.take_completed_token_activity_output() {
+        // Drain the whole queue: several completed `/usage` cards can be waiting
+        // if the user re-ran the command while insertion was blocked.
+        while let Some(cell) = self.chat_widget.take_completed_token_activity_output() {
             self.insert_history_cell(tui, Box::new(cell));
         }
         if let Some(cell) = self.chat_widget.take_pending_rate_limit_reset_hint() {

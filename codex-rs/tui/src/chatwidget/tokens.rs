@@ -158,7 +158,9 @@ impl ChatWidget {
         self.next_token_activity_request_id =
             self.next_token_activity_request_id.wrapping_add(/*rhs*/ 1);
         let (cell, handle) = new_token_activity_output(view);
-        self.completed_token_activity_output = None;
+        // Do not discard a completed card still awaiting insertion: it stays queued
+        // in `completed_token_activity_output` and is committed when the insertion
+        // barrier next clears (via the usual lifecycle-driven commit attempts).
         self.refreshing_token_activity_output = Some(PendingTokenActivityOutput {
             request_id,
             cell,
@@ -181,7 +183,7 @@ impl ChatWidget {
             .map(|output| &output.cell as &dyn HistoryCell)
             .or_else(|| {
                 self.completed_token_activity_output
-                    .as_ref()
+                    .first()
                     .map(|cell| cell as &dyn HistoryCell)
             })
     }
@@ -204,7 +206,7 @@ impl ChatWidget {
             return false;
         }
         output.handle.finish(result);
-        self.completed_token_activity_output = Some(output.cell);
+        self.completed_token_activity_output.push(output.cell);
         self.bump_active_cell_revision();
         self.request_redraw();
         true
@@ -247,7 +249,10 @@ impl ChatWidget {
     /// [`ChatWidget::usage_history_insertion_blocked`] returns `false`;
     /// taking the card removes it from the transient render area.
     pub(crate) fn take_completed_token_activity_output(&mut self) -> Option<CompositeHistoryCell> {
-        let output = self.completed_token_activity_output.take()?;
+        if self.completed_token_activity_output.is_empty() {
+            return None;
+        }
+        let output = self.completed_token_activity_output.remove(0);
         self.bump_active_cell_revision();
         Some(output)
     }
@@ -257,7 +262,7 @@ impl ChatWidget {
     /// This is used after stream or history lifecycle events that may have cleared
     /// the insertion barriers without directly owning the completed output.
     pub(crate) fn request_pending_usage_output_insertion(&self) {
-        if self.completed_token_activity_output.is_some()
+        if !self.completed_token_activity_output.is_empty()
             || self.pending_rate_limit_reset_hint().is_some()
         {
             self.app_event_tx.send(AppEvent::CommitPendingUsageOutput);
@@ -265,7 +270,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn request_pending_usage_output_insertion_after_stream_shutdown(&self) {
-        if self.completed_token_activity_output.is_some()
+        if !self.completed_token_activity_output.is_empty()
             || self.pending_rate_limit_reset_hint().is_some()
         {
             self.app_event_tx
@@ -279,7 +284,8 @@ impl ChatWidget {
     /// backtrack, or replacement flow clears this widget-owned state.
     pub(crate) fn clear_pending_token_activity_refreshes(&mut self) {
         let cleared_refresh = self.refreshing_token_activity_output.take().is_some();
-        let cleared_completed = self.completed_token_activity_output.take().is_some();
+        let cleared_completed = !self.completed_token_activity_output.is_empty();
+        self.completed_token_activity_output.clear();
         if cleared_refresh || cleared_completed {
             self.bump_active_cell_revision();
             self.request_redraw();
