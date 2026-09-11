@@ -64,7 +64,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         )[0]
 
         self.assertIn("qualify-release-packages:", unix)
-        self.assertIn("scripts/codex_package/smoke_tests", qualification)
+        self.assertIn("moedex_behavior_manifest.py package-journeys", qualification)
         self.assertIn("sdk/python/tests", qualification)
         self.assertIn("--cli-archive", qualification)
         self.assertIn("--app-server-archive", qualification)
@@ -88,8 +88,17 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn('fork_commit="$(git rev-parse HEAD)"', qualification)
         self.assertIn('--fork-commit "${fork_commit}"', qualification)
         self.assertIn("--channel github", qualification)
-        self.assertEqual(qualification.count("--archive"), 4)
+        self.assertIn("--cli-archive", qualification)
+        self.assertIn("--app-server-archive", qualification)
+        self.assertIn("--combined-symbols-archive", qualification)
+        self.assertIn("--cli-symbols-archive", qualification)
+        self.assertIn("--app-server-symbols-archive", qualification)
         self.assertIn("moedex-behavior-evidence-${{ matrix.target }}", qualification)
+        release = unix.split("\n  release:\n", 1)[1].split(
+            "\n  publish-r2-assets:\n", 1
+        )[0]
+        self.assertIn("pattern: moedex-behavior-evidence-*", release)
+        self.assertIn("merge-multiple: true", release)
 
     def test_default_build_has_no_oidc_permission_or_cosign_step(self) -> None:
         unix = UNIX_WORKFLOW.read_text()

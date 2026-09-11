@@ -181,6 +181,34 @@
         "pytest",
         "scripts/install/test_install_ps1.py"
       ]
+    },
+    "doctor-updates": {
+      "cwd": "codex-rs",
+      "argv": [
+        "just",
+        "test",
+        "-p",
+        "codex-cli",
+        "doctor::updates::tests::update_action_labels_install_contexts"
+      ]
+    },
+    "package-journeys": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "scripts/moedex_behavior_manifest.py",
+        "package-journeys"
+      ]
+    },
+    "behavior-artifacts": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "scripts/moedex_behavior_manifest.py",
+        "verify",
+        "--artifact-dir",
+        "behavior-artifacts"
+      ]
     }
   },
   "requirements": [
@@ -190,7 +218,8 @@
       "status": "intentional-change",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
       "tests": [
-        "cli"
+        "cli",
+        "package-journeys"
       ],
       "artifacts": [
         {
@@ -304,6 +333,7 @@
       "status": "intentional-change",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
       "tests": [
+        "doctor-updates",
         "package-unit",
         "install-unix",
         "install-windows"
@@ -319,7 +349,9 @@
       "status": "intentional-change",
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
       "tests": [
-        "package-unit"
+        "package-unit",
+        "package-journeys",
+        "behavior-artifacts"
       ],
       "artifacts": [
         {
@@ -436,30 +468,261 @@
   "sourceInventory": {
     "files": [
       "codex-cli/bin/codex.js",
+      "codex-cli/package.json",
       "scripts/install/install.sh",
       "scripts/install/install.ps1",
+      "scripts/codex_package/layout.py",
+      "codex-rs/cli/src/doctor/updates.rs",
       "codex-rs/tui/src/updates.rs",
       "codex-rs/tui/src/update_action.rs",
-      "codex-rs/product-identity/src/lib.rs"
+      "codex-rs/tui/src/update_prompt.rs",
+      "codex-rs/product-identity/src/lib.rs",
+      ".github/workflows/moedex-qualification.yml",
+      ".github/workflows/rust-release.yml",
+      ".github/workflows/rust-release-windows.yml",
+      ".github/workflows/rust-release-prepare.yml",
+      ".github/workflows/rust-release-argument-comment-lint.yml",
+      ".github/workflows/rust-release-provisioned-macos.yml",
+      ".github/workflows/r2-release.yml",
+      ".github/workflows/python-runtime-release.yml",
+      ".github/workflows/python-sdk-cli-release.yml",
+      ".github/workflows/python-sdk-release.yml",
+      ".github/workflows/rust-release-zsh.yml",
+      ".github/workflows/rusty-v8-release.yml"
     ],
     "expectations": [
       {
+        "path": "codex-cli/bin/codex.js",
+        "literal": "@zak-keown/moedex",
+        "count": 14
+      },
+      {
+        "path": "codex-cli/package.json",
+        "literal": "@zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "codex-cli/package.json",
         "literal": "github.com/zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "scripts/install/install.sh",
+        "literal": "github.com/zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "scripts/install/install.sh",
+        "literal": "api.github.com/repos/zak-keown/moedex",
+        "count": 2
+      },
+      {
+        "path": "scripts/install/install.ps1",
+        "literal": "api.github.com/repos/zak-keown/moedex",
+        "count": 2
+      },
+      {
+        "path": "scripts/codex_package/layout.py",
+        "literal": "zak-keown/moedex",
+        "count": 2
+      },
+      {
+        "path": "codex-rs/cli/src/doctor/updates.rs",
+        "literal": "api.github.com/repos/zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "codex-rs/cli/src/doctor/updates.rs",
+        "literal": "GitHub Releases (zak-keown/moedex)",
         "count": 4
       },
       {
+        "path": "codex-rs/tui/src/updates.rs",
         "literal": "api.github.com/repos/zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "codex-rs/tui/src/update_action.rs",
+        "literal": "github.com/zak-keown/moedex",
+        "count": 3
+      },
+      {
+        "path": "codex-rs/tui/src/update_prompt.rs",
+        "literal": "github.com/zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": "codex-rs/product-identity/src/lib.rs",
+        "literal": "zak-keown/moedex",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/moedex-qualification.yml",
+        "literal": "https://github.com/openai/codex.git",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rust-release.yml",
+        "literal": "github.repository == 'zak-keown/moedex'",
         "count": 5
       },
       {
-        "literal": "@zak-keown/moedex",
-        "count": 14
+        "path": ".github/workflows/rust-release.yml",
+        "literal": "moedex-behavior-evidence-*",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rust-release-windows.yml",
+        "literal": "WINDOWS_BINARIES: \"moedex",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rust-release-prepare.yml",
+        "literal": "github.repository == 'zak-keown/moedex'",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rust-release-argument-comment-lint.yml",
+        "literal": "workflow_call:",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rust-release-provisioned-macos.yml",
+        "literal": "workflow_call:",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/r2-release.yml",
+        "literal": "CODEX_R2_",
+        "count": 4
+      },
+      {
+        "path": ".github/workflows/python-runtime-release.yml",
+        "literal": "github.repository == 'openai/codex'",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/python-sdk-cli-release.yml",
+        "literal": "github.repository == 'openai/codex'",
+        "count": 2
+      },
+      {
+        "path": ".github/workflows/python-sdk-release.yml",
+        "literal": "github.repository == 'openai/codex'",
+        "count": 2
+      },
+      {
+        "path": ".github/workflows/rust-release-zsh.yml",
+        "literal": "${GITHUB_REPOSITORY}",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/rusty-v8-release.yml",
+        "literal": "${GITHUB_REPOSITORY}",
+        "count": 3
       }
     ],
     "forbiddenRegex": [
-      "https?://(?:api\\\\.)?github\\\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)",
-      "(?:npm\\\\s+install|pnpm\\\\s+add|bun\\\\s+install|vp\\\\s+install)[^\\\\n]*@openai/codex",
-      "formulae\\\\.brew\\\\.sh/(?:api/)?cask/codex"
+      {
+        "path": "codex-cli/bin/codex.js",
+        "pattern": "https?://(?:api\\\\.)?github\\\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-cli/bin/codex.js",
+        "pattern": "(?:npm\\\\s+install|pnpm\\\\s+add|bun\\\\s+install|vp\\\\s+install)[^\\\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-cli/bin/codex.js",
+        "pattern": "formulae\\\\.brew\\\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-cli/package.json",
+        "pattern": "https?://(?:api\\\\.)?github\\\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-cli/package.json",
+        "pattern": "(?:npm\\\\s+install|pnpm\\\\s+add|bun\\\\s+install|vp\\\\s+install)[^\\\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-cli/package.json",
+        "pattern": "formulae\\\\.brew\\\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "scripts/install/install.sh",
+        "pattern": "https?://(?:api\\\\.)?github\\\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "scripts/install/install.sh",
+        "pattern": "(?:npm\\\\s+install|pnpm\\\\s+add|bun\\\\s+install|vp\\\\s+install)[^\\\\n]*@openai/codex"
+      },
+      {
+        "path": "scripts/install/install.sh",
+        "pattern": "formulae\\\\.brew\\\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "scripts/install/install.ps1",
+        "pattern": "https?://(?:api\\\\.)?github\\\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "scripts/install/install.ps1",
+        "pattern": "(?:npm\\\\s+install|pnpm\\\\s+add|bun\\\\s+install|vp\\\\s+install)[^\\\\n]*@openai/codex"
+      },
+      {
+        "path": "scripts/install/install.ps1",
+        "pattern": "formulae\\\\.brew\\\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/cli/src/doctor/updates.rs",
+        "pattern": "https?://(?:api\\\\.)?github\\\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/cli/src/doctor/updates.rs",
+        "pattern": "(?:npm\\\\s+install|pnpm\\\\s+add|bun\\\\s+install|vp\\\\s+install)[^\\\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/cli/src/doctor/updates.rs",
+        "pattern": "formulae\\\\.brew\\\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/updates.rs",
+        "pattern": "https?://(?:api\\\\.)?github\\\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/tui/src/updates.rs",
+        "pattern": "(?:npm\\\\s+install|pnpm\\\\s+add|bun\\\\s+install|vp\\\\s+install)[^\\\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/updates.rs",
+        "pattern": "formulae\\\\.brew\\\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/update_action.rs",
+        "pattern": "https?://(?:api\\\\.)?github\\\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/tui/src/update_action.rs",
+        "pattern": "(?:npm\\\\s+install|pnpm\\\\s+add|bun\\\\s+install|vp\\\\s+install)[^\\\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/update_action.rs",
+        "pattern": "formulae\\\\.brew\\\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/update_prompt.rs",
+        "pattern": "https?://(?:api\\\\.)?github\\\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)"
+      },
+      {
+        "path": "codex-rs/tui/src/update_prompt.rs",
+        "pattern": "(?:npm\\\\s+install|pnpm\\\\s+add|bun\\\\s+install|vp\\\\s+install)[^\\\\n]*@openai/codex"
+      },
+      {
+        "path": "codex-rs/tui/src/update_prompt.rs",
+        "pattern": "formulae\\\\.brew\\\\.sh/(?:api/)?cask/codex"
+      },
+      {
+        "path": ".github/workflows/rust-release.yml",
+        "pattern": "vars\\\\.MOEDEX_ENABLE_(?:R2|DOTSLASH|NPM|WEBSITE|WINGET|BRANCH)"
+      }
     ]
   }
 }

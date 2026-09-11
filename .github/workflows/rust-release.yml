@@ -1587,30 +1587,42 @@ jobs:
         with:
           target: ${{ matrix.target }}
       - name: Exercise assembled archives with conflicting PATH
-        working-directory: scripts/codex_package/smoke_tests
         shell: bash
         run: |
           # Includes test_missing_required_helper_fails_qualification and both
           # package entrypoints with conflicting stock helpers first on PATH.
+          # The package-journeys gate runs test_codex_package.py and
+          # test_symbol_archives.py with these real archive inputs.
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             python_path_separator=";"
           else
             python_path_separator=":"
           fi
           export PYTHONPATH="${GITHUB_WORKSPACE}/sdk/python/src${python_path_separator}${GITHUB_WORKSPACE}/sdk/python/tests"
-          uv run --frozen pytest -v \
-            --compression gzip \
-            --package-target "${{ matrix.target }}" \
-            --cli-archive "${GITHUB_WORKSPACE}/package-artifacts/codex-package-${{ matrix.target }}.tar.gz" \
-            --app-server-archive "${GITHUB_WORKSPACE}/package-artifacts/codex-app-server-package-${{ matrix.target }}.tar.gz" \
-            --cli-symbols-archive "${GITHUB_WORKSPACE}/package-artifacts/codex-symbols-${{ matrix.target }}.tar.gz" \
-            --app-server-symbols-archive "${GITHUB_WORKSPACE}/package-artifacts/codex-symbols-${{ matrix.app_server_artifact }}.tar.gz" \
-            test_codex_package.py test_symbol_archives.py
+          export MOEDEX_PACKAGE_TARGET="${{ matrix.target }}"
+          export MOEDEX_CLI_ARCHIVE="${GITHUB_WORKSPACE}/package-artifacts/codex-package-${{ matrix.target }}.tar.gz"
+          export MOEDEX_APP_SERVER_ARCHIVE="${GITHUB_WORKSPACE}/package-artifacts/codex-app-server-package-${{ matrix.target }}.tar.gz"
+          export MOEDEX_CLI_SYMBOLS_ARCHIVE="${GITHUB_WORKSPACE}/package-artifacts/codex-symbols-${{ matrix.target }}.tar.gz"
+          export MOEDEX_APP_SERVER_SYMBOLS_ARCHIVE="${GITHUB_WORKSPACE}/package-artifacts/codex-symbols-${{ matrix.app_server_artifact }}.tar.gz"
+          python3 scripts/moedex_behavior_manifest.py package-journeys
 
       - name: Verify behavior manifest against release packages
         shell: bash
         run: |
           fork_commit="$(git rev-parse HEAD)"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            symbol_args=(
+              --combined-symbols-archive
+              "package-artifacts/codex-symbols-${{ matrix.target }}.tar.gz"
+            )
+          else
+            symbol_args=(
+              --cli-symbols-archive
+              "package-artifacts/codex-symbols-${{ matrix.target }}.tar.gz"
+              --app-server-symbols-archive
+              "package-artifacts/codex-symbols-${{ matrix.app_server_artifact }}.tar.gz"
+            )
+          fi
           python3 - <<'PY'
           import tarfile
           from pathlib import Path
@@ -1631,12 +1643,10 @@ jobs:
             --target "${{ matrix.target }}" \
             --channel github \
             --fork-commit "${fork_commit}" \
-            --archive "package-artifacts/codex-package-${{ matrix.target }}.tar.gz" \
-            --archive "package-artifacts/codex-app-server-package-${{ matrix.target }}.tar.gz" \
-            --archive "package-artifacts/codex-symbols-${{ matrix.target }}.tar.gz" \
-            --archive "package-artifacts/codex-symbols-${{ matrix.app_server_artifact }}.tar.gz" \
-            --passed-gate release-package-smoke \
-            --passed-gate release-symbol-smoke \
+            --cli-archive "package-artifacts/codex-package-${{ matrix.target }}.tar.gz" \
+            --app-server-archive "package-artifacts/codex-app-server-package-${{ matrix.target }}.tar.gz" \
+            "${symbol_args[@]}" \
+            --passed-gate package-journeys \
             --passed-gate behavior-artifacts \
             --output "behavior-evidence/moedex-${{ matrix.target }}.json"
 
@@ -1783,6 +1793,13 @@ jobs:
           path: dist
           pattern: "{*-symbols,argument-comment-lint-*,python-runtime-wheel-*}"
 
+      - name: Download retained Moedex behavior evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          pattern: moedex-behavior-evidence-*
+          merge-multiple: true
+
       - name: List
         run: ls -R dist/
 
@@ -1870,318 +1887,3 @@ jobs:
           # Mark as prerelease only when the version has a suffix after x.y.z
           # (e.g. -alpha, -beta). Otherwise publish a normal release.
           prerelease: ${{ steps.release_name.outputs.prerelease }}
-
-  publish-r2-assets:
-    name: publish-r2-assets
-    needs: release
-    if: ${{ vars.MOEDEX_ENABLE_R2_PUBLISH == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/r2-release.yml
-    secrets: inherit
-    with:
-      tag: ${{ needs.release.outputs.tag }}
-      make_latest: ${{ fromJSON(needs.release.outputs.make_latest) }}
-      prerelease: ${{ fromJSON(needs.release.outputs.prerelease) }}
-      stage: assets
-
-  publish-r2:
-    name: publish-r2
-    needs: [release, publish-dotslash, publish-r2-assets]
-    if: ${{ vars.MOEDEX_ENABLE_R2_PUBLISH == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/r2-release.yml
-    secrets: inherit
-    with:
-      tag: ${{ needs.release.outputs.tag }}
-      make_latest: ${{ fromJSON(needs.release.outputs.make_latest) }}
-      prerelease: ${{ fromJSON(needs.release.outputs.prerelease) }}
-      stage: finalize
-
-  publish-dotslash:
-    name: publish-dotslash
-    needs: release
-    if: ${{ vars.MOEDEX_ENABLE_DOTSLASH_PUBLISH == 'true' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - uses: facebook/dotslash-publish-release@9c9ec027515c34db9282a09a25a9cab5880b2c52 # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag: ${{ github.ref_name }}
-          config: .github/dotslash-config.json
-
-      - uses: facebook/dotslash-publish-release@9c9ec027515c34db9282a09a25a9cab5880b2c52 # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag: ${{ github.ref_name }}
-          config: .github/dotslash-argument-comment-lint-config.json
-
-  # Publish to npm using OIDC authentication.
-  # July 31, 2025: https://github.blog/changelog/2025-07-31-npm-trusted-publishing-with-oidc-is-generally-available/
-  # npm docs: https://docs.npmjs.com/trusted-publishers
-  publish-npm:
-    # Publish to npm for stable releases, numbered alphas, and alpha hotfixes.
-    if: >-
-      ${{
-        vars.MOEDEX_ENABLE_NPM_PUBLISH == 'true' &&
-        !cancelled() &&
-        needs.release.result == 'success' &&
-        needs.release.outputs.should_publish_npm == 'true'
-      }}
-    name: publish-npm
-    needs: release
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write # Required for OIDC
-      contents: read
-
-    steps:
-      - name: Setup Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          # Node 24 bundles npm >= 11.5.1, which trusted publishing requires.
-          node-version: 24
-          registry-url: "https://registry.npmjs.org"
-          scope: "@zak-keown"
-
-      - name: Download npm tarballs from release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.release.outputs.tag }}
-          RELEASE_VERSION: ${{ needs.release.outputs.version }}
-        run: |
-          set -euo pipefail
-          version="$RELEASE_VERSION"
-          tag="$RELEASE_TAG"
-          mkdir -p dist/npm
-          patterns=(
-            "codex-npm-${version}.tgz"
-            "codex-npm-linux-*-${version}.tgz"
-            "codex-npm-darwin-*-${version}.tgz"
-            "codex-npm-win32-*-${version}.tgz"
-            "codex-responses-api-proxy-npm-${version}.tgz"
-            "codex-sdk-npm-${version}.tgz"
-          )
-          for pattern in "${patterns[@]}"; do
-            gh release download "$tag" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --pattern "$pattern" \
-              --dir dist/npm
-          done
-
-      # No NODE_AUTH_TOKEN needed because we use OIDC.
-      - name: Publish to npm
-        env:
-          VERSION: ${{ needs.release.outputs.version }}
-          NPM_TAG: ${{ needs.release.outputs.npm_tag }}
-        run: |
-          set -euo pipefail
-          prefix=""
-          if [[ -n "${NPM_TAG}" ]]; then
-            prefix="${NPM_TAG}-"
-          fi
-
-          root_tarball="dist/npm/codex-npm-${VERSION}.tgz"
-          sdk_tarball="dist/npm/codex-sdk-npm-${VERSION}.tgz"
-          # Keep this list in sync with CODEX_PLATFORM_PACKAGES in
-          # codex-cli/scripts/build_npm_package.py. The root wrapper advances
-          # @zak-keown/moedex@latest as soon as it publishes, so every platform
-          # package it aliases must already exist in the registry first.
-          platform_tarballs=(
-            "dist/npm/codex-npm-linux-x64-${VERSION}.tgz"
-            "dist/npm/codex-npm-linux-arm64-${VERSION}.tgz"
-            "dist/npm/codex-npm-darwin-x64-${VERSION}.tgz"
-            "dist/npm/codex-npm-darwin-arm64-${VERSION}.tgz"
-            "dist/npm/codex-npm-win32-x64-${VERSION}.tgz"
-            "dist/npm/codex-npm-win32-arm64-${VERSION}.tgz"
-          )
-
-          for required_tarball in "${platform_tarballs[@]}" "${root_tarball}"; do
-            if [[ ! -f "${required_tarball}" ]]; then
-              echo "Missing npm tarball: ${required_tarball}"
-              exit 1
-            fi
-          done
-
-          shopt -s nullglob
-          other_tarballs=()
-          for tarball in dist/npm/*-"${VERSION}".tgz; do
-            if [[ "${tarball}" == "${root_tarball}" || "${tarball}" == "${sdk_tarball}" ]]; then
-              continue
-            fi
-
-            is_platform_tarball=false
-            for platform_tarball in "${platform_tarballs[@]}"; do
-              if [[ "${tarball}" == "${platform_tarball}" ]]; then
-                is_platform_tarball=true
-                break
-              fi
-            done
-            if [[ "${is_platform_tarball}" == true ]]; then
-              continue
-            fi
-
-            other_tarballs+=("${tarball}")
-          done
-
-          # npm returns HTTP 409 when concurrent publishes update the same
-          # packument. Every platform tarball is a version of @zak-keown/moedex,
-          # so publish all tarballs serially.
-          tarballs=(
-            "${platform_tarballs[@]}"
-            "${other_tarballs[@]}"
-            "${root_tarball}"
-          )
-          # The SDK depends on this exact root package version.
-          if [[ -f "${sdk_tarball}" ]]; then
-            tarballs+=("${sdk_tarball}")
-          fi
-
-          for tarball in "${tarballs[@]}"; do
-            filename="$(basename "${tarball}")"
-            tag=""
-
-            case "${filename}" in
-              codex-npm-linux-*-"${VERSION}".tgz|codex-npm-darwin-*-"${VERSION}".tgz|codex-npm-win32-*-"${VERSION}".tgz)
-                platform="${filename#codex-npm-}"
-                platform="${platform%-"${VERSION}.tgz"}"
-                tag="${prefix}${platform}"
-                ;;
-              codex-npm-"${VERSION}".tgz|codex-responses-api-proxy-npm-"${VERSION}".tgz|codex-sdk-npm-"${VERSION}".tgz)
-                tag="${NPM_TAG}"
-                ;;
-              *)
-                echo "Unexpected npm tarball: ${filename}"
-                exit 1
-                ;;
-            esac
-
-            publish_cmd=(npm publish "${GITHUB_WORKSPACE}/${tarball}")
-            if [[ -n "${tag}" ]]; then
-              publish_cmd+=(--tag "${tag}")
-            fi
-
-            echo "+ ${publish_cmd[*]}"
-            set +e
-            publish_output="$("${publish_cmd[@]}" 2>&1)"
-            publish_status=$?
-            set -e
-
-            echo "${publish_output}"
-            if [[ ${publish_status} -eq 0 ]]; then
-              continue
-            fi
-
-            if grep -qiE "previously published|cannot publish over|version already exists" <<< "${publish_output}"; then
-              echo "Skipping already-published package version for ${filename}"
-              continue
-            fi
-
-            exit "${publish_status}"
-          done
-
-  deploy-dev-website:
-    name: Trigger developers.openai.com deploy
-    needs: release
-    # Only trigger the deploy for a stable release.
-    # The deploy updates developers.openai.com with the new config schema json file.
-    if: >-
-      ${{
-        vars.MOEDEX_ENABLE_WEBSITE_DEPLOY == 'true' &&
-        !cancelled() &&
-        needs.release.result == 'success' &&
-        !contains(needs.release.outputs.version, '-')
-      }}
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    permissions: {}
-    environment:
-      name: dev-website-vercel-deploy
-      deployment: false
-
-    steps:
-      - name: Trigger developers.openai.com deploy
-        continue-on-error: true
-        env:
-          DEV_WEBSITE_VERCEL_DEPLOY_HOOK_URL: ${{ secrets.DEV_WEBSITE_VERCEL_DEPLOY_HOOK_URL }}
-        run: |
-          if ! curl -sS -f -o /dev/null -X POST "$DEV_WEBSITE_VERCEL_DEPLOY_HOOK_URL"; then
-            echo "::warning title=developers.openai.com deploy hook failed::Vercel deploy hook POST failed for ${GITHUB_REF_NAME}"
-            exit 1
-          fi
-
-  winget:
-    name: winget
-    needs: release
-    # Only publish stable/mainline releases to WinGet; pre-releases include a
-    # '-' in the semver string (e.g., 1.2.3-alpha.1).
-    if: >-
-      ${{
-        vars.MOEDEX_ENABLE_WINGET_PUBLISH == 'true' &&
-        !cancelled() &&
-        needs.release.result == 'success' &&
-        !contains(needs.release.outputs.version, '-')
-      }}
-    # This job only invokes a GitHub Action to open/update the winget-pkgs PR;
-    # it does not execute Windows-only tooling, so Linux is sufficient.
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    environment:
-      name: mainline-release-winget
-      deployment: false
-
-    steps:
-      - name: Publish to WinGet
-        uses: vedantmgoyal9/winget-releaser@7bd472be23763def6e16bd06cc8b1cdfab0e2fd5
-        with:
-          identifier: OpenAI.Codex
-          version: ${{ needs.release.outputs.version }}
-          release-tag: ${{ needs.release.outputs.tag }}
-          fork-user: openai-oss-forks
-          installers-regex: '^codex-(?:x86_64|aarch64)-pc-windows-msvc\.exe\.zip$'
-          token: ${{ secrets.WINGET_PUBLISH_PAT }}
-
-  update-branch:
-    name: Update latest-alpha-cli branch
-    if: >-
-      ${{
-        vars.MOEDEX_ENABLE_BRANCH_UPDATE == 'true' &&
-        !cancelled() &&
-        needs.release.result == 'success' &&
-        needs.publish-r2.result == 'success' &&
-        (
-          needs.release.outputs.should_publish_npm != 'true' ||
-          needs.publish-npm.result == 'success'
-        )
-      }}
-    permissions:
-      contents: write
-    # R2 waits for the GitHub release and DotSlash release-asset uploads.
-    needs:
-      - release
-      - publish-r2
-      - publish-npm
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Update latest-alpha-cli branch
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          gh api \
-            "repos/${GITHUB_REPOSITORY}/git/refs/heads/latest-alpha-cli" \
-            -X PATCH \
-            -f sha="${GITHUB_SHA}" \
-            -F force=true

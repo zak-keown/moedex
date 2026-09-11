@@ -56,8 +56,10 @@ jobs:
         run: |
           git cat-file -e "${UPSTREAM_BASE}^{commit}"
           git merge-base --is-ancestor "${UPSTREAM_BASE}" FETCH_HEAD
+          git merge-base --is-ancestor "${UPSTREAM_BASE}" HEAD
+          test "$(git merge-base "${UPSTREAM_BASE}" HEAD)" = "${UPSTREAM_BASE}"
           uv run --with pytest pytest -q scripts/test_moedex_behavior_manifest.py \
-            -k 'upstream_rebase_mutations or source_inventory'
+            -k 'upstream_rebase_mutations or source_inventory or real_upstream_surface or recorded_upstream_base'
 
   focused-rust-gates:
     runs-on: ubuntu-24.04

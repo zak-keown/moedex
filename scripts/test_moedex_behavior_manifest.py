@@ -6,7 +6,10 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
+import tarfile
+import io
 
 import pytest
 
@@ -27,9 +30,24 @@ def repository_manifest() -> dict:
 def fixture_manifest() -> dict:
     manifest = copy.deepcopy(repository_manifest())
     manifest["sourceInventory"] = {
-        "files": ["surface.txt"],
-        "expectations": [{"literal": "github.com/zak-keown/moedex", "count": 1}],
-        "forbiddenRegex": [r"github\.com/openai/codex/releases"],
+        "files": ["surface.txt", "second.txt"],
+        "expectations": [
+            {
+                "path": "surface.txt",
+                "literal": "github.com/zak-keown/moedex",
+                "count": 1,
+            },
+            {"path": "second.txt", "literal": "release: disabled", "count": 1},
+            {
+                "path": "second.txt",
+                "literal": "github.com/zak-keown/moedex",
+                "count": 0,
+            },
+        ],
+        "forbiddenRegex": [
+            {"path": "surface.txt", "pattern": r"github\.com/openai/codex/releases"},
+            {"path": "second.txt", "pattern": r"npm publish"},
+        ],
     }
     return manifest
 
@@ -40,10 +58,24 @@ def write_manifest(root: Path, manifest: dict) -> Path:
     return path
 
 
-def write_package(root: Path, entrypoint: str, target: str = "x86_64-unknown-linux-musl") -> None:
-    payloads = [entrypoint, "bin/codex-code-mode-host", "codex-path/rg"]
-    if entrypoint.endswith("moedex"):
+def write_package(
+    root: Path, entrypoint: str, target: str = "x86_64-unknown-linux-musl"
+) -> None:
+    suffix = ".exe" if "windows" in target else ""
+    payloads = [
+        entrypoint,
+        f"bin/codex-code-mode-host{suffix}",
+        f"codex-path/rg{suffix}",
+    ]
+    if "linux" in target:
         payloads.append("codex-resources/bwrap")
+    if "windows" in target:
+        payloads.extend(
+            [
+                "codex-resources/codex-command-runner.exe",
+                "codex-resources/codex-windows-sandbox-setup.exe",
+            ]
+        )
     for relative in payloads:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,7 +85,9 @@ def write_package(root: Path, entrypoint: str, target: str = "x86_64-unknown-lin
         "layoutVersion": 1,
         "version": "0.1.0",
         "target": target,
-        "variant": "codex" if entrypoint.endswith("moedex") else "codex-app-server",
+        "variant": "codex"
+        if Path(entrypoint).name in {"moedex", "moedex.exe"}
+        else "codex-app-server",
         "entrypoint": entrypoint,
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
@@ -77,6 +111,21 @@ def artifact_fixture(root: Path) -> Path:
     write_package(artifact_root / "cli", "bin/moedex")
     write_package(artifact_root / "app-server", "bin/codex-app-server")
     return artifact_root
+
+
+def write_symbols(path: Path, root_name: str, names: list[str], extension: str) -> Path:
+    with tarfile.open(path, "w:gz") as archive:
+        for name in names:
+            payload = name.encode()
+            member = tarfile.TarInfo(f"{root_name}/{name}.{extension}")
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+    return path
+
+
+def source_fixture(root: Path) -> None:
+    (root / "surface.txt").write_text("github.com/zak-keown/moedex")
+    (root / "second.txt").write_text("release: disabled")
 
 
 def test_repository_manifest_is_complete_and_strict() -> None:
@@ -139,12 +188,30 @@ def test_non_broken_requirement_must_have_real_mapping() -> None:
     assert "B2 must map to a gate or artifact" in behavior.validate_manifest(manifest)
 
 
+def test_preserved_or_superseded_requirement_requires_executable_gate() -> None:
+    manifest = fixture_manifest()
+    entry = next(item for item in manifest["requirements"] if item["id"] == "B10")
+    entry["tests"] = []
+    entry["artifacts"] = [{"paths": ["cli/bin/version.txt"], "executable": False}]
+    assert (
+        "B10 preserved behavior requires an executable gate"
+        in behavior.validate_manifest(manifest)
+    )
+
+
+def test_b1_and_b9_map_the_packaged_archive_journeys() -> None:
+    manifest = repository_manifest()
+    by_id = {entry["id"]: entry for entry in manifest["requirements"]}
+    assert "package-journeys" in by_id["B1"]["tests"]
+    assert "package-journeys" in by_id["B9"]["tests"]
+
+
 def test_broken_requirement_never_certifies(tmp_path: Path) -> None:
     manifest = fixture_manifest()
     entry = manifest["requirements"][0]
     entry["status"] = "broken"
     entry["reason"] = "fixture breakage"
-    (tmp_path / "surface.txt").write_text("github.com/zak-keown/moedex")
+    source_fixture(tmp_path)
     errors, _ = behavior.verify(write_manifest(tmp_path, manifest), tmp_path)
     assert "manifest contains a broken requirement" in errors
 
@@ -171,8 +238,8 @@ def test_source_inventory_is_an_exact_multiset_and_rejects_upstream_adoption(
     tmp_path: Path,
 ) -> None:
     manifest = fixture_manifest()
+    source_fixture(tmp_path)
     source = tmp_path / "surface.txt"
-    source.write_text("github.com/zak-keown/moedex")
     assert behavior.verify_source_inventory(manifest, tmp_path) == []
 
     source.write_text("github.com/zak-keown/moedex\ngithub.com/zak-keown/moedex")
@@ -180,6 +247,13 @@ def test_source_inventory_is_an_exact_multiset_and_rejects_upstream_adoption(
         "source occurrence mismatch" in error
         for error in behavior.verify_source_inventory(manifest, tmp_path)
     )
+
+    source.write_text("")
+    (tmp_path / "second.txt").write_text(
+        "release: disabled\ngithub.com/zak-keown/moedex"
+    )
+    errors = behavior.verify_source_inventory(manifest, tmp_path)
+    assert sum("source occurrence mismatch" in error for error in errors) == 2
 
     source.write_text(
         "github.com/zak-keown/moedex\nhttps://github.com/openai/codex/releases/latest"
@@ -204,6 +278,51 @@ def test_upstream_rebase_mutations_cannot_silently_drop_a_mapped_behavior(
     assert "B1 must map to a gate or artifact" in behavior.validate_manifest(manifest)
 
 
+def test_real_upstream_surface_adoption_mutation_fails_full_verification(
+    tmp_path: Path,
+) -> None:
+    manifest = fixture_manifest()
+    source_fixture(tmp_path)
+    manifest_path = write_manifest(tmp_path, manifest)
+    clean, _ = behavior.verify(manifest_path, tmp_path)
+    assert clean == []
+    (tmp_path / "surface.txt").write_text(
+        "https://github.com/openai/codex/releases/latest"
+    )
+    errors, _ = behavior.verify(manifest_path, tmp_path)
+    assert any("forbidden upstream adoption target" in error for error in errors)
+
+
+def test_recorded_upstream_base_must_be_fork_head_ancestor(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "fixture@example.com"], cwd=tmp_path, check=True
+    )
+    source = tmp_path / "surface"
+    source.write_text("base")
+    subprocess.run(["git", "add", "surface"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=tmp_path, check=True)
+    base = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    source.write_text("fork")
+    subprocess.run(["git", "commit", "-qam", "fork"], cwd=tmp_path, check=True)
+    assert behavior.verify_git_ancestry({"upstreamBase": base}, tmp_path) == []
+    unrelated = tmp_path / "unrelated"
+    subprocess.run(
+        ["git", "checkout", "--orphan", "unrelated"], cwd=tmp_path, check=True
+    )
+    source.unlink()
+    unrelated.write_text("unrelated")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "unrelated"], cwd=tmp_path, check=True)
+    assert any(
+        "is not an ancestor" in error
+        for error in behavior.verify_git_ancestry({"upstreamBase": base}, tmp_path)
+    )
+
+
 def test_split_package_layout_and_embedded_provenance_pass(tmp_path: Path) -> None:
     manifest = fixture_manifest()
     errors, metadata = behavior.verify_artifacts(manifest, artifact_fixture(tmp_path))
@@ -216,8 +335,52 @@ def test_missing_required_helper_or_checksum_fails(tmp_path: Path) -> None:
     artifact_root = artifact_fixture(tmp_path)
     (artifact_root / "cli/bin/codex-code-mode-host").unlink()
     errors, _ = behavior.verify_artifacts(manifest, artifact_root)
-    assert any("checksum manifest does not exactly cover payloads" in error for error in errors)
+    assert any(
+        "checksum manifest does not exactly cover payloads" in error for error in errors
+    )
     assert any("package payload" in error for error in errors)
+
+
+def test_linux_package_rejects_windows_entrypoint_suffix(tmp_path: Path) -> None:
+    manifest = fixture_manifest()
+    artifact_root = tmp_path / "artifacts"
+    write_package(artifact_root / "cli", "bin/moedex.exe")
+    write_package(artifact_root / "app-server", "bin/codex-app-server.exe")
+    errors, _ = behavior.verify_artifacts(manifest, artifact_root)
+    assert any("expected 'bin/moedex'" in error for error in errors)
+    assert any("expected 'bin/codex-app-server'" in error for error in errors)
+
+
+def test_app_server_package_requires_platform_helpers(tmp_path: Path) -> None:
+    manifest = fixture_manifest()
+    artifact_root = artifact_fixture(tmp_path)
+    app_bwrap = artifact_root / "app-server/codex-resources/bwrap"
+    app_bwrap.unlink()
+    metadata_path = artifact_root / "app-server/codex-package.json"
+    metadata = json.loads(metadata_path.read_text())
+    del metadata["checksums"]["codex-resources/bwrap"]
+    metadata_path.write_text(json.dumps(metadata))
+    errors, _ = behavior.verify_artifacts(manifest, artifact_root)
+    assert (
+        "app-server: missing required package helper: codex-resources/bwrap" in errors
+    )
+
+
+def test_package_rejects_unexpected_platform_helper_even_when_checksummed(
+    tmp_path: Path,
+) -> None:
+    manifest = fixture_manifest()
+    artifact_root = artifact_fixture(tmp_path)
+    extra = artifact_root / "app-server/codex-resources/codex-command-runner.exe"
+    extra.write_bytes(b"unexpected")
+    metadata_path = artifact_root / "app-server/codex-package.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["checksums"]["codex-resources/codex-command-runner.exe"] = hashlib.sha256(
+        extra.read_bytes()
+    ).hexdigest()
+    metadata_path.write_text(json.dumps(metadata))
+    errors, _ = behavior.verify_artifacts(manifest, artifact_root)
+    assert any("platform helper inventory mismatch" in error for error in errors)
 
 
 def test_symlink_escape_and_non_regular_artifacts_fail(tmp_path: Path) -> None:
@@ -231,7 +394,9 @@ def test_symlink_escape_and_non_regular_artifacts_fail(tmp_path: Path) -> None:
     entrypoint.unlink()
     entrypoint.symlink_to(outside)
     errors, _ = behavior.verify_artifacts(manifest, artifact_root)
-    assert any("escapes root" in error or "not a regular file" in error for error in errors)
+    assert any(
+        "escapes root" in error or "not a regular file" in error for error in errors
+    )
 
 
 def test_unix_executable_bit_is_required(tmp_path: Path) -> None:
@@ -249,13 +414,24 @@ def test_evidence_binds_manifest_archives_target_and_provenance(tmp_path: Path) 
     manifest = fixture_manifest()
     manifest_path = write_manifest(tmp_path, manifest)
     _, metadata = behavior.verify_artifacts(manifest, artifact_fixture(tmp_path))
-    archives = [
-        tmp_path / "codex-package-x86_64-unknown-linux-musl.tar.gz",
-        tmp_path / "codex-app-server-package-x86_64-unknown-linux-musl.tar.gz",
-        tmp_path / "codex-symbols-x86_64-unknown-linux-musl.tar.gz",
-        tmp_path / "codex-symbols-x86_64-unknown-linux-musl-app-server.tar.gz",
-    ]
-    for archive in archives:
+    archives = {
+        "cliPackage": tmp_path / "codex-package-x86_64-unknown-linux-musl.tar.gz",
+        "appServerPackage": tmp_path
+        / "codex-app-server-package-x86_64-unknown-linux-musl.tar.gz",
+        "cliSymbols": write_symbols(
+            tmp_path / "codex-symbols-x86_64-unknown-linux-musl.tar.gz",
+            "codex-symbols-x86_64-unknown-linux-musl",
+            ["moedex", "codex-code-mode-host", "codex-responses-api-proxy"],
+            "debug",
+        ),
+        "appServerSymbols": write_symbols(
+            tmp_path / "codex-symbols-x86_64-unknown-linux-musl-app-server.tar.gz",
+            "codex-symbols-x86_64-unknown-linux-musl-app-server",
+            ["codex-app-server", "codex-code-mode-host"],
+            "debug",
+        ),
+    }
+    for archive in (archives["cliPackage"], archives["appServerPackage"]):
         archive.write_bytes(archive.name.encode())
     output = tmp_path / "evidence.json"
     behavior.write_evidence(
@@ -267,26 +443,139 @@ def test_evidence_binds_manifest_archives_target_and_provenance(tmp_path: Path) 
         archives,
         metadata,
         manifest,
-        ["release-package-smoke", "release-symbol-smoke", "behavior-artifacts"],
+        ["package-journeys", "behavior-artifacts"],
     )
     evidence = json.loads(output.read_text())
     assert evidence["upstreamBase"] == UPSTREAM_BASE
     assert evidence["targetTriple"] == "x86_64-unknown-linux-musl"
-    assert evidence["manifestSha256"] == hashlib.sha256(
-        manifest_path.read_bytes()
-    ).hexdigest()
-    assert {item["name"] for item in evidence["archives"]} == {
-        archive.name for archive in archives
-    }
+    assert (
+        evidence["manifestSha256"]
+        == hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    )
+    assert set(evidence["archives"]) == set(archives)
     assert evidence["passedGateIds"] == [
         "behavior-artifacts",
-        "release-package-smoke",
-        "release-symbol-smoke",
+        "package-journeys",
     ]
 
 
 def test_repository_source_inventory_passes() -> None:
     manifest = repository_manifest()
-    assert behavior.verify_source_inventory(
-        manifest, Path(__file__).resolve().parents[1]
-    ) == []
+    assert (
+        behavior.verify_source_inventory(manifest, Path(__file__).resolve().parents[1])
+        == []
+    )
+
+
+def test_release_evidence_rejects_wrong_target_or_duplicate_symbol_roles(
+    tmp_path: Path,
+) -> None:
+    manifest = fixture_manifest()
+    manifest_path = write_manifest(tmp_path, manifest)
+    _, metadata = behavior.verify_artifacts(manifest, artifact_fixture(tmp_path))
+    cli_symbols = write_symbols(
+        tmp_path / "codex-symbols-other-target.tar.gz",
+        "codex-symbols-other-target",
+        ["moedex", "codex-code-mode-host", "codex-responses-api-proxy"],
+        "debug",
+    )
+    package_paths = {
+        "cliPackage": tmp_path / "codex-package-x86_64-unknown-linux-musl.tar.gz",
+        "appServerPackage": tmp_path
+        / "codex-app-server-package-x86_64-unknown-linux-musl.tar.gz",
+    }
+    for path in package_paths.values():
+        path.write_bytes(path.name.encode())
+    archives = {
+        **package_paths,
+        "cliSymbols": cli_symbols,
+        "appServerSymbols": cli_symbols,
+    }
+    with pytest.raises(ValueError, match="archive roles must reference unique paths"):
+        behavior.write_evidence(
+            manifest_path,
+            tmp_path / "evidence.json",
+            "x86_64-unknown-linux-musl",
+            "github",
+            "f" * 40,
+            archives,
+            metadata,
+            manifest,
+            sorted(behavior.RELEASE_EVIDENCE_GATES),
+        )
+
+    correct_cli = write_symbols(
+        tmp_path / "codex-symbols-x86_64-unknown-linux-musl.tar.gz",
+        "codex-symbols-x86_64-unknown-linux-musl",
+        ["moedex", "codex-code-mode-host", "codex-responses-api-proxy"],
+        "debug",
+    )
+    wrong_app = write_symbols(
+        tmp_path / "codex-symbols-other-app-server.tar.gz",
+        "codex-symbols-other-app-server",
+        ["codex-app-server", "codex-code-mode-host"],
+        "debug",
+    )
+    archives = {
+        **package_paths,
+        "cliSymbols": correct_cli,
+        "appServerSymbols": wrong_app,
+    }
+    with pytest.raises(ValueError, match="appServerSymbols archive name must be"):
+        behavior.write_evidence(
+            manifest_path,
+            tmp_path / "evidence.json",
+            "x86_64-unknown-linux-musl",
+            "github",
+            "f" * 40,
+            archives,
+            metadata,
+            manifest,
+            sorted(behavior.RELEASE_EVIDENCE_GATES),
+        )
+
+
+def test_windows_release_evidence_uses_one_combined_symbols_archive(
+    tmp_path: Path,
+) -> None:
+    target = "x86_64-pc-windows-msvc"
+    manifest = fixture_manifest()
+    manifest_path = write_manifest(tmp_path, manifest)
+    artifact_root = tmp_path / "artifacts"
+    write_package(artifact_root / "cli", "bin/moedex.exe", target)
+    write_package(artifact_root / "app-server", "bin/codex-app-server.exe", target)
+    errors, metadata = behavior.verify_artifacts(manifest, artifact_root)
+    assert errors == []
+    cli_package = tmp_path / f"codex-package-{target}.tar.gz"
+    app_package = tmp_path / f"codex-app-server-package-{target}.tar.gz"
+    cli_package.write_bytes(b"cli")
+    app_package.write_bytes(b"app")
+    combined = write_symbols(
+        tmp_path / f"codex-symbols-{target}.tar.gz",
+        f"codex-symbols-{target}",
+        [
+            "moedex",
+            "codex-app-server",
+            "codex-code-mode-host",
+            "codex-command-runner",
+            "codex-responses-api-proxy",
+            "codex-windows-sandbox-setup",
+        ],
+        "pdb",
+    )
+    archives = {
+        "cliPackage": cli_package,
+        "appServerPackage": app_package,
+        "combinedSymbols": combined,
+    }
+    behavior.write_evidence(
+        manifest_path,
+        tmp_path / "evidence.json",
+        target,
+        "github",
+        "f" * 40,
+        archives,
+        metadata,
+        manifest,
+        sorted(behavior.RELEASE_EVIDENCE_GATES),
+    )

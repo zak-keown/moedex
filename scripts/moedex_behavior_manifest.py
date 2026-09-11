@@ -10,6 +10,7 @@ import re
 import stat
 import subprocess
 import sys
+import tarfile
 from typing import Any
 
 
@@ -20,8 +21,7 @@ REQUIRED_IDS = tuple([f"B{number}" for number in range(1, 14)] + ["U4", "U5"])
 STATUSES = {"preserved", "superseded", "intentional-change", "broken"}
 RELEASE_EVIDENCE_GATES = {
     "behavior-artifacts",
-    "release-package-smoke",
-    "release-symbol-smoke",
+    "package-journeys",
 }
 ROOT_FIELDS = {
     "schemaVersion",
@@ -44,18 +44,26 @@ REQUIREMENT_FIELDS = {
 }
 ARTIFACT_FIELDS = {"paths", "executable"}
 SOURCE_INVENTORY_FIELDS = {"files", "expectations", "forbiddenRegex"}
-EXPECTATION_FIELDS = {"literal", "count"}
+EXPECTATION_FIELDS = {"path", "literal", "count"}
+FORBIDDEN_FIELDS = {"path", "pattern"}
 
 
 def _unknown_fields(value: dict[str, Any], allowed: set[str], label: str) -> list[str]:
-    return [f"unknown field in {label}: {field}" for field in sorted(set(value) - allowed)]
+    return [
+        f"unknown field in {label}: {field}" for field in sorted(set(value) - allowed)
+    ]
 
 
 def _safe_relative_path(value: object, label: str) -> tuple[str | None, list[str]]:
     if not isinstance(value, str) or not value:
         return None, [f"{label} must be a nonempty relative POSIX path"]
     path = PurePosixPath(value)
-    if path.is_absolute() or ".." in path.parts or "." in path.parts or value != path.as_posix():
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or "." in path.parts
+        or value != path.as_posix()
+    ):
         return None, [f"unsafe {label}: {value}"]
     return value, []
 
@@ -102,7 +110,11 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
         cwd, path_errors = _safe_relative_path(gate.get("cwd"), f"gate {name} cwd")
         errors.extend(path_errors)
         argv = gate.get("argv")
-        if not isinstance(argv, list) or not argv or any(not isinstance(arg, str) or not arg for arg in argv):
+        if (
+            not isinstance(argv, list)
+            or not argv
+            or any(not isinstance(arg, str) or not arg for arg in argv)
+        ):
             errors.append(f"gate {name} argv must be a nonempty string array")
         if cwd is None:
             continue
@@ -125,7 +137,10 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
             continue
         ids.append(requirement_id)
         label = requirement_id
-        if not isinstance(entry.get("requirement"), str) or not entry["requirement"].strip():
+        if (
+            not isinstance(entry.get("requirement"), str)
+            or not entry["requirement"].strip()
+        ):
             errors.append(f"{label} requirement must be nonempty")
         status = entry.get("status")
         if status not in STATUSES:
@@ -133,14 +148,18 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
         if entry.get("upstreamBase") != manifest.get("upstreamBase"):
             errors.append(f"{label} upstreamBase does not match manifest")
         tests = entry.get("tests")
-        if not isinstance(tests, list) or any(not isinstance(test, str) or not test for test in tests):
+        if not isinstance(tests, list) or any(
+            not isinstance(test, str) or not test for test in tests
+        ):
             errors.append(f"{label} tests must be a string array")
             tests = []
         for test in tests:
             if test not in gates:
                 errors.append(f"{label} references missing gate: {test}")
         exclusions = entry.get("exclusions")
-        if not isinstance(exclusions, list) or any(not isinstance(item, str) or not item.strip() for item in exclusions):
+        if not isinstance(exclusions, list) or any(
+            not isinstance(item, str) or not item.strip() for item in exclusions
+        ):
             errors.append(f"{label} exclusions must be an explicit string array")
         artifacts = entry.get("artifacts")
         if not isinstance(artifacts, list):
@@ -170,6 +189,8 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
                 errors.append(f"broken requirement {label} must have a reason")
         elif not tests and not artifacts:
             errors.append(f"{label} must map to a gate or artifact")
+        if status in {"preserved", "superseded"} and not tests:
+            errors.append(f"{label} {status} behavior requires an executable gate")
 
     duplicate_ids = sorted({item for item in ids if ids.count(item) > 1})
     if duplicate_ids:
@@ -185,12 +206,14 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
     if not isinstance(inventory, dict):
         errors.append("sourceInventory must be an object")
     else:
-        errors.extend(_unknown_fields(inventory, SOURCE_INVENTORY_FIELDS, "sourceInventory"))
+        errors.extend(
+            _unknown_fields(inventory, SOURCE_INVENTORY_FIELDS, "sourceInventory")
+        )
+        seen_files: set[str] = set()
         files = inventory.get("files")
         if not isinstance(files, list) or not files:
             errors.append("sourceInventory files must be a nonempty array")
         else:
-            seen_files: set[str] = set()
             for value in files:
                 path, path_errors = _safe_relative_path(value, "source inventory file")
                 errors.extend(path_errors)
@@ -198,40 +221,75 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
                     if path in seen_files:
                         errors.append(f"duplicate source inventory file: {path}")
                     seen_files.add(path)
+        covered_files: set[str] = set()
         expectations = inventory.get("expectations")
         if not isinstance(expectations, list) or not expectations:
             errors.append("sourceInventory expectations must be a nonempty array")
         else:
-            seen_literals: set[str] = set()
+            seen_expectations: set[tuple[str, str]] = set()
             for index, expectation in enumerate(expectations):
                 label = f"source expectation[{index}]"
                 if not isinstance(expectation, dict):
                     errors.append(f"{label} must be an object")
                     continue
                 errors.extend(_unknown_fields(expectation, EXPECTATION_FIELDS, label))
+                path, path_errors = _safe_relative_path(
+                    expectation.get("path"), f"{label} path"
+                )
+                errors.extend(path_errors)
+                if path is not None and path not in seen_files:
+                    errors.append(f"{label} path is not inventoried: {path}")
+                elif path is not None:
+                    covered_files.add(path)
                 literal = expectation.get("literal")
                 count = expectation.get("count")
                 if not isinstance(literal, str) or not literal:
                     errors.append(f"{label} literal must be nonempty")
-                elif literal in seen_literals:
-                    errors.append(f"duplicate source expectation: {literal}")
+                elif (expectation.get("path"), literal) in seen_expectations:
+                    errors.append(
+                        f"duplicate source expectation: {expectation.get('path')} {literal}"
+                    )
                 else:
-                    seen_literals.add(literal)
+                    seen_expectations.add((expectation.get("path"), literal))
                 if not isinstance(count, int) or isinstance(count, bool) or count < 0:
                     errors.append(f"{label} count must be a nonnegative integer")
         forbidden = inventory.get("forbiddenRegex")
-        if not isinstance(forbidden, list) or not forbidden or any(not isinstance(pattern, str) or not pattern for pattern in forbidden):
-            errors.append("sourceInventory forbiddenRegex must be a nonempty string array")
+        if not isinstance(forbidden, list) or not forbidden:
+            errors.append("sourceInventory forbiddenRegex must be a nonempty array")
         else:
-            for pattern in forbidden:
+            for index, item in enumerate(forbidden):
+                label = f"source forbiddenRegex[{index}]"
+                if not isinstance(item, dict):
+                    errors.append(f"{label} must be an object")
+                    continue
+                errors.extend(_unknown_fields(item, FORBIDDEN_FIELDS, label))
+                path, path_errors = _safe_relative_path(
+                    item.get("path"), f"{label} path"
+                )
+                errors.extend(path_errors)
+                if path is not None and path not in seen_files:
+                    errors.append(f"{label} path is not inventoried: {path}")
+                elif path is not None:
+                    covered_files.add(path)
+                pattern = item.get("pattern")
+                if not isinstance(pattern, str) or not pattern:
+                    errors.append(f"{label} pattern must be nonempty")
+                    continue
                 try:
                     re.compile(pattern)
                 except re.error as error:
                     errors.append(f"invalid forbiddenRegex {pattern!r}: {error}")
+        uncovered = sorted(seen_files - covered_files)
+        if uncovered:
+            errors.append(
+                "source inventory files without checks: " + ", ".join(uncovered)
+            )
     return errors
 
 
-def _resolve_regular_file(root: Path, relative: str, label: str) -> tuple[Path | None, list[str]]:
+def _resolve_regular_file(
+    root: Path, relative: str, label: str
+) -> tuple[Path | None, list[str]]:
     candidate = root / relative
     try:
         resolved_root = root.resolve(strict=True)
@@ -247,25 +305,63 @@ def _resolve_regular_file(root: Path, relative: str, label: str) -> tuple[Path |
 
 def verify_source_inventory(manifest: dict[str, Any], repo_root: Path) -> list[str]:
     inventory = manifest["sourceInventory"]
-    contents: list[str] = []
+    contents: dict[str, str] = {}
     errors: list[str] = []
     for relative in inventory["files"]:
-        path, path_errors = _resolve_regular_file(repo_root, relative, "source inventory file")
+        path, path_errors = _resolve_regular_file(
+            repo_root, relative, "source inventory file"
+        )
         errors.extend(path_errors)
         if path is not None:
-            contents.append(path.read_text(encoding="utf-8"))
-    joined = "\n".join(contents)
+            contents[relative] = path.read_text(encoding="utf-8")
     for expectation in inventory["expectations"]:
-        actual = joined.count(expectation["literal"])
+        actual = contents.get(expectation["path"], "").count(expectation["literal"])
         if actual != expectation["count"]:
             errors.append(
                 f"source occurrence mismatch for {expectation['literal']!r}: "
                 f"expected {expectation['count']}, got {actual}"
             )
-    for pattern in inventory["forbiddenRegex"]:
-        if re.search(pattern, joined, re.IGNORECASE):
-            errors.append(f"forbidden upstream adoption target matched: {pattern}")
+    for item in inventory["forbiddenRegex"]:
+        if re.search(item["pattern"], contents.get(item["path"], ""), re.IGNORECASE):
+            errors.append(
+                "forbidden upstream adoption target matched in "
+                f"{item['path']}: {item['pattern']}"
+            )
     return errors
+
+
+def verify_git_ancestry(
+    manifest: dict[str, Any], repo_root: Path, fork_commit: str = "HEAD"
+) -> list[str]:
+    base = manifest["upstreamBase"]
+    try:
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", base, fork_commit],
+            cwd=repo_root,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as error:
+        return [f"could not verify upstream ancestry: {error}"]
+    if result.returncode != 0:
+        detail = result.stderr.strip()
+        return [
+            f"recorded upstreamBase {base} is not an ancestor of {fork_commit}"
+            + (f": {detail}" if detail else "")
+        ]
+    merge_base = subprocess.run(
+        ["git", "merge-base", base, fork_commit],
+        cwd=repo_root,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if merge_base.returncode != 0 or merge_base.stdout.strip() != base:
+        return [f"fork merge-base does not equal recorded upstreamBase {base}"]
+    return []
 
 
 def _sha256(path: Path) -> str:
@@ -276,11 +372,113 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _symbol_names(path: Path, expected_root: str, target: str) -> set[str]:
+    try:
+        with tarfile.open(path, "r:gz") as archive:
+            members = archive.getmembers()
+    except tarfile.TarError as error:
+        raise ValueError(f"invalid symbols archive {path.name}: {error}") from error
+    names: set[str] = set()
+    for member in members:
+        relative = PurePosixPath(member.name)
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise ValueError(f"unsafe symbols archive member: {member.name}")
+        if relative.parts[0] != expected_root:
+            raise ValueError(
+                f"symbols archive {path.name} has unexpected root {relative.parts[0]!r}"
+            )
+        if member.issym() or member.islnk():
+            raise ValueError(f"symbols archive contains link: {member.name}")
+        if len(relative.parts) < 2:
+            continue
+        item = relative.parts[1]
+        if "windows" in target and member.isfile() and item.endswith(".pdb"):
+            names.add(item.removesuffix(".pdb"))
+        elif "linux" in target and member.isfile() and item.endswith(".debug"):
+            names.add(item.removesuffix(".debug"))
+        elif "apple-darwin" in target and item.endswith(".dSYM"):
+            names.add(item.removesuffix(".dSYM"))
+    return names
+
+
+def _validate_release_archives(target: str, archives: dict[str, Path]) -> None:
+    windows = "windows" in target
+    expected_roles = (
+        {"cliPackage", "appServerPackage", "combinedSymbols"}
+        if windows
+        else {"cliPackage", "appServerPackage", "cliSymbols", "appServerSymbols"}
+    )
+    if set(archives) != expected_roles:
+        raise ValueError(
+            "release archive roles must be exactly: "
+            + ", ".join(sorted(expected_roles))
+        )
+    resolved_paths = [path.resolve() for path in archives.values()]
+    if len(set(resolved_paths)) != len(resolved_paths):
+        raise ValueError("archive roles must reference unique paths")
+    expected_names = {
+        "cliPackage": f"codex-package-{target}.tar.gz",
+        "appServerPackage": f"codex-app-server-package-{target}.tar.gz",
+    }
+    if windows:
+        expected_names["combinedSymbols"] = f"codex-symbols-{target}.tar.gz"
+    else:
+        expected_names.update(
+            {
+                "cliSymbols": f"codex-symbols-{target}.tar.gz",
+                "appServerSymbols": f"codex-symbols-{target}-app-server.tar.gz",
+            }
+        )
+    for role, expected_name in expected_names.items():
+        path = archives[role]
+        if path.name != expected_name:
+            raise ValueError(
+                f"{role} archive name must be {expected_name}, got {path.name}"
+            )
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"release evidence archive is not a regular file: {path}")
+    if windows:
+        actual = _symbol_names(
+            archives["combinedSymbols"], f"codex-symbols-{target}", target
+        )
+        expected = {
+            "moedex",
+            "codex-app-server",
+            "codex-code-mode-host",
+            "codex-command-runner",
+            "codex-responses-api-proxy",
+            "codex-windows-sandbox-setup",
+        }
+        if actual != expected:
+            raise ValueError(
+                f"combinedSymbols inventory mismatch: expected {sorted(expected)}, got {sorted(actual)}"
+            )
+    else:
+        symbol_specs = {
+            "cliSymbols": (
+                f"codex-symbols-{target}",
+                {"moedex", "codex-code-mode-host", "codex-responses-api-proxy"},
+            ),
+            "appServerSymbols": (
+                f"codex-symbols-{target}-app-server",
+                {"codex-app-server", "codex-code-mode-host"},
+            ),
+        }
+        for role, (root, expected) in symbol_specs.items():
+            actual = _symbol_names(archives[role], root, target)
+            if actual != expected:
+                raise ValueError(
+                    f"{role} inventory mismatch: expected {sorted(expected)}, got {sorted(actual)}"
+                )
+
+
 def _validate_package(
-    package_root: Path, expected_entrypoints: set[str], expected_variant: str
+    package_root: Path, expected_variant: str
 ) -> tuple[list[str], dict[str, Any] | None]:
     errors: list[str] = []
-    manifest_path, path_errors = _resolve_regular_file(package_root, "codex-package.json", "package manifest")
+    manifest_path, path_errors = _resolve_regular_file(
+        package_root, "codex-package.json", "package manifest"
+    )
     errors.extend(path_errors)
     if manifest_path is None:
         return errors, None
@@ -289,8 +487,6 @@ def _validate_package(
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
         return [*errors, f"invalid package manifest: {error}"], None
     entrypoint = metadata.get("entrypoint")
-    if entrypoint not in expected_entrypoints:
-        errors.append(f"unexpected package entrypoint: {entrypoint!r}")
     if metadata.get("layoutVersion") != 1:
         errors.append("package layoutVersion must be 1")
     if metadata.get("variant") != expected_variant:
@@ -299,45 +495,80 @@ def _validate_package(
     if not isinstance(target, str) or not target:
         errors.append("package target must be nonempty")
         target = ""
+    supported_targets = {
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "aarch64-unknown-linux-musl",
+        "x86_64-unknown-linux-musl",
+        "aarch64-pc-windows-msvc",
+        "x86_64-pc-windows-msvc",
+    }
+    if target and target not in supported_targets:
+        errors.append(f"unsupported release package target: {target}")
+    suffix = ".exe" if "windows" in target else ""
+    entrypoint_stem = "moedex" if expected_variant == "codex" else "codex-app-server"
+    expected_entrypoint = f"bin/{entrypoint_stem}{suffix}"
+    if entrypoint != expected_entrypoint:
+        errors.append(
+            f"unexpected package entrypoint: expected {expected_entrypoint!r}, got {entrypoint!r}"
+        )
     if not isinstance(metadata.get("version"), str) or not metadata["version"]:
         errors.append("package version must be nonempty")
-    if metadata.get("pathDir") != "codex-path" or metadata.get("resourcesDir") != "codex-resources":
+    if (
+        metadata.get("pathDir") != "codex-path"
+        or metadata.get("resourcesDir") != "codex-resources"
+    ):
         errors.append("package helper directories do not match layout version 1")
     provenance = metadata.get("provenance")
     if not isinstance(provenance, dict):
         errors.append("package provenance must be an object")
     else:
-        for key, expected in {"product": "moedex", "repository": "zak-keown/moedex"}.items():
+        for key, expected in {
+            "product": "moedex",
+            "repository": "zak-keown/moedex",
+        }.items():
             if provenance.get(key) != expected:
-                errors.append(f"invalid package provenance {key}: {provenance.get(key)!r}")
+                errors.append(
+                    f"invalid package provenance {key}: {provenance.get(key)!r}"
+                )
         for key in ("forkCommit", "upstreamCommit", "releaseChannel"):
-            if not isinstance(provenance.get(key), str) or provenance[key].strip().lower() in {"", "unknown"}:
+            if not isinstance(provenance.get(key), str) or provenance[
+                key
+            ].strip().lower() in {"", "unknown"}:
                 errors.append(f"package provenance {key} is missing")
     checksums = metadata.get("checksums")
     if not isinstance(checksums, dict):
         errors.append("package checksums must be an object")
         return errors, metadata
-    executable_suffix = ".exe" if "windows" in target else ""
     required_helpers = [
-        f"bin/codex-code-mode-host{executable_suffix}",
-        f"codex-path/rg{executable_suffix}",
+        f"bin/codex-code-mode-host{suffix}",
+        f"codex-path/rg{suffix}",
     ]
-    if expected_variant == "codex" and "linux" in target:
+    if "linux" in target:
         required_helpers.append("codex-resources/bwrap")
-    if expected_variant == "codex" and "windows" in target:
+    if "windows" in target:
         required_helpers.extend(
             [
                 "codex-resources/codex-command-runner.exe",
                 "codex-resources/codex-windows-sandbox-setup.exe",
             ]
         )
-    if isinstance(entrypoint, str):
-        required_helpers.append(entrypoint)
+    required_helpers.append(expected_entrypoint)
     for relative in required_helpers:
-        helper, helper_errors = _resolve_regular_file(package_root, relative, "required package helper")
+        helper, helper_errors = _resolve_regular_file(
+            package_root, relative, "required package helper"
+        )
         errors.extend(helper_errors)
-        if helper is not None and os.name != "nt" and target and "windows" not in target:
-            if helper.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH) == 0:
+        if (
+            helper is not None
+            and os.name != "nt"
+            and target
+            and "windows" not in target
+        ):
+            if (
+                helper.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                == 0
+            ):
                 errors.append(f"required package helper is not executable: {relative}")
     payloads = {
         path.relative_to(package_root).as_posix()
@@ -346,6 +577,39 @@ def _validate_package(
     }
     if set(checksums) != payloads:
         errors.append("package checksum manifest does not exactly cover payloads")
+    expected_bins = {expected_entrypoint, f"bin/codex-code-mode-host{suffix}"}
+    actual_bins = {path for path in payloads if path.startswith("bin/")}
+    if actual_bins != expected_bins:
+        errors.append(
+            f"package bin inventory mismatch: expected {sorted(expected_bins)}, got {sorted(actual_bins)}"
+        )
+    expected_path_helpers = {f"codex-path/rg{suffix}"}
+    actual_path_helpers = {path for path in payloads if path.startswith("codex-path/")}
+    if actual_path_helpers != expected_path_helpers:
+        errors.append(
+            "package PATH helper inventory mismatch: "
+            f"expected {sorted(expected_path_helpers)}, got {sorted(actual_path_helpers)}"
+        )
+    expected_resource_files: set[str] = set()
+    if "linux" in target:
+        expected_resource_files.add("codex-resources/bwrap")
+    if "windows" in target:
+        expected_resource_files.update(
+            {
+                "codex-resources/codex-command-runner.exe",
+                "codex-resources/codex-windows-sandbox-setup.exe",
+            }
+        )
+    actual_resource_files = {
+        path
+        for path in payloads
+        if path.startswith("codex-resources/") and path.count("/") == 1
+    }
+    if actual_resource_files != expected_resource_files:
+        errors.append(
+            "package platform helper inventory mismatch: "
+            f"expected {sorted(expected_resource_files)}, got {sorted(actual_resource_files)}"
+        )
     for relative, expected in checksums.items():
         safe, safe_errors = _safe_relative_path(relative, "package checksum path")
         errors.extend(safe_errors)
@@ -353,21 +617,21 @@ def _validate_package(
             continue
         path, file_errors = _resolve_regular_file(package_root, safe, "package payload")
         errors.extend(file_errors)
-        if path is not None and (not isinstance(expected, str) or _sha256(path) != expected):
+        if path is not None and (
+            not isinstance(expected, str) or _sha256(path) != expected
+        ):
             errors.append(f"package checksum mismatch: {relative}")
     return errors, metadata
 
 
-def verify_artifacts(manifest: dict[str, Any], artifact_root: Path) -> tuple[list[str], list[dict[str, Any]]]:
+def verify_artifacts(
+    manifest: dict[str, Any], artifact_root: Path
+) -> tuple[list[str], list[dict[str, Any]]]:
     errors: list[str] = []
     package_metadata: list[dict[str, Any]] = []
-    cli_errors, cli = _validate_package(
-        artifact_root / "cli", {"bin/moedex", "bin/moedex.exe"}, "codex"
-    )
+    cli_errors, cli = _validate_package(artifact_root / "cli", "codex")
     app_errors, app = _validate_package(
-        artifact_root / "app-server",
-        {"bin/codex-app-server", "bin/codex-app-server.exe"},
-        "codex-app-server",
+        artifact_root / "app-server", "codex-app-server"
     )
     errors.extend(f"cli: {error}" for error in cli_errors)
     errors.extend(f"app-server: {error}" for error in app_errors)
@@ -389,7 +653,8 @@ def verify_artifacts(manifest: dict[str, Any], artifact_root: Path) -> tuple[lis
                     matches.append((relative, path))
             if len(matches) != 1:
                 errors.append(
-                    f"{entry['id']} artifact requires exactly one of: " + ", ".join(artifact["paths"])
+                    f"{entry['id']} artifact requires exactly one of: "
+                    + ", ".join(artifact["paths"])
                 )
                 continue
             relative, path = matches[0]
@@ -400,7 +665,9 @@ def verify_artifacts(manifest: dict[str, Any], artifact_root: Path) -> tuple[lis
     return errors, package_metadata
 
 
-def verify(manifest_path: Path, repo_root: Path, artifact_dir: Path | None = None) -> tuple[list[str], list[dict[str, Any]]]:
+def verify(
+    manifest_path: Path, repo_root: Path, artifact_dir: Path | None = None
+) -> tuple[list[str], list[dict[str, Any]]]:
     try:
         manifest = load_manifest(manifest_path)
     except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -412,7 +679,9 @@ def verify(manifest_path: Path, repo_root: Path, artifact_dir: Path | None = Non
         if artifact_dir is not None:
             artifact_errors, package_metadata = verify_artifacts(manifest, artifact_dir)
             errors.extend(artifact_errors)
-    if any(entry.get("status") == "broken" for entry in manifest.get("requirements", [])):
+    if any(
+        entry.get("status") == "broken" for entry in manifest.get("requirements", [])
+    ):
         errors.append("manifest contains a broken requirement")
     return errors, package_metadata
 
@@ -423,7 +692,7 @@ def write_evidence(
     target: str,
     channel: str,
     fork_commit: str,
-    archives: list[Path],
+    archives: dict[str, Path],
     package_metadata: list[dict[str, Any]],
     manifest: dict[str, Any],
     passed_gate_ids: list[str],
@@ -435,21 +704,10 @@ def write_evidence(
     if set(passed_gate_ids) != RELEASE_EVIDENCE_GATES or len(passed_gate_ids) != len(
         RELEASE_EVIDENCE_GATES
     ):
-        raise ValueError("release evidence must record every archive qualification gate exactly once")
-    if len(archives) != 4:
-        raise ValueError("release evidence requires two package and two symbols archives")
-    expected_packages = {
-        f"codex-package-{target}.tar.gz",
-        f"codex-app-server-package-{target}.tar.gz",
-    }
-    archive_names = [path.name for path in archives]
-    if not expected_packages.issubset(archive_names):
-        raise ValueError("release evidence package archive names do not match target")
-    if sum(name.startswith("codex-symbols-") and name.endswith(".tar.gz") for name in archive_names) != 2:
-        raise ValueError("release evidence requires two symbols archive inputs")
-    for archive in archives:
-        if archive.is_symlink() or not archive.is_file():
-            raise ValueError(f"release evidence archive is not a regular file: {archive}")
+        raise ValueError(
+            "release evidence must record every archive qualification gate exactly once"
+        )
+    _validate_release_archives(target, archives)
     provenance = package_metadata[0]["provenance"]
     evidence = {
         "schemaVersion": 1,
@@ -459,9 +717,10 @@ def write_evidence(
         "upstreamBase": manifest["upstreamBase"],
         "releaseChannel": channel,
         "targetTriple": target,
-        "archives": [
-            {"name": path.name, "sha256": _sha256(path)} for path in archives
-        ],
+        "archives": {
+            role: {"name": path.name, "sha256": _sha256(path)}
+            for role, path in sorted(archives.items())
+        },
         "embeddedProvenance": provenance,
         "passedGateIds": sorted(set(passed_gate_ids)),
     }
@@ -474,7 +733,35 @@ def write_evidence(
     if any(metadata.get("target") != target for metadata in package_metadata):
         raise ValueError("package target does not match evidence")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output.write_text(
+        json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def run_package_journeys(repo_root: Path) -> int:
+    required_environment = {
+        "MOEDEX_PACKAGE_TARGET": "--package-target",
+        "MOEDEX_CLI_ARCHIVE": "--cli-archive",
+        "MOEDEX_APP_SERVER_ARCHIVE": "--app-server-archive",
+        "MOEDEX_CLI_SYMBOLS_ARCHIVE": "--cli-symbols-archive",
+        "MOEDEX_APP_SERVER_SYMBOLS_ARCHIVE": "--app-server-symbols-archive",
+    }
+    missing = [name for name in required_environment if not os.environ.get(name)]
+    if missing:
+        print(
+            "error: packaged journey environment is missing: " + ", ".join(missing),
+            file=sys.stderr,
+        )
+        return 2
+    command = ["uv", "run", "--frozen", "pytest", "-v", "--compression", "gzip"]
+    for environment, option in required_environment.items():
+        command.extend([option, os.environ[environment]])
+    command.extend(["test_codex_package.py", "test_symbol_archives.py"])
+    return subprocess.run(
+        command,
+        cwd=repo_root / "scripts/codex_package/smoke_tests",
+        check=False,
+    ).returncode
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -489,19 +776,36 @@ def main(argv: list[str] | None = None) -> int:
     evidence_parser.add_argument("--target", required=True)
     evidence_parser.add_argument("--channel", required=True)
     evidence_parser.add_argument("--fork-commit", required=True)
-    evidence_parser.add_argument("--archive", type=Path, action="append", required=True)
+    evidence_parser.add_argument("--cli-archive", type=Path, required=True)
+    evidence_parser.add_argument("--app-server-archive", type=Path, required=True)
+    symbols = evidence_parser.add_mutually_exclusive_group(required=True)
+    symbols.add_argument("--combined-symbols-archive", type=Path)
+    symbols.add_argument("--cli-symbols-archive", type=Path)
+    evidence_parser.add_argument("--app-server-symbols-archive", type=Path)
     evidence_parser.add_argument("--passed-gate", action="append", required=True)
     evidence_parser.add_argument("--output", type=Path, required=True)
     gates_parser = subparsers.add_parser("run-gates")
     gates_parser.add_argument("--gate", action="append", required=True)
+    subparsers.add_parser("package-journeys")
     args = parser.parse_args(argv)
 
-    errors, package_metadata = verify(args.manifest, args.repo_root, getattr(args, "artifact_dir", None))
+    errors, package_metadata = verify(
+        args.manifest, args.repo_root, getattr(args, "artifact_dir", None)
+    )
+    if not errors:
+        ancestry_commit = args.fork_commit if args.command == "evidence" else "HEAD"
+        errors.extend(
+            verify_git_ancestry(
+                load_manifest(args.manifest), args.repo_root, ancestry_commit
+            )
+        )
     if errors:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)
         return 1
     manifest = load_manifest(args.manifest)
+    if args.command == "package-journeys":
+        return run_package_journeys(args.repo_root)
     if args.command == "run-gates":
         unknown = sorted(set(args.gate) - set(manifest["gates"]))
         if unknown:
@@ -514,9 +818,29 @@ def main(argv: list[str] | None = None) -> int:
                 gate["argv"], cwd=args.repo_root / gate["cwd"], check=False
             )
             if result.returncode:
-                print(f"error: gate {name} failed with {result.returncode}", file=sys.stderr)
+                print(
+                    f"error: gate {name} failed with {result.returncode}",
+                    file=sys.stderr,
+                )
                 return result.returncode
     if args.command == "evidence":
+        archives = {
+            "cliPackage": args.cli_archive,
+            "appServerPackage": args.app_server_archive,
+        }
+        if args.combined_symbols_archive is not None:
+            if args.app_server_symbols_archive is not None:
+                parser.error(
+                    "--app-server-symbols-archive cannot accompany --combined-symbols-archive"
+                )
+            archives["combinedSymbols"] = args.combined_symbols_archive
+        else:
+            if args.app_server_symbols_archive is None:
+                parser.error(
+                    "--app-server-symbols-archive is required with --cli-symbols-archive"
+                )
+            archives["cliSymbols"] = args.cli_symbols_archive
+            archives["appServerSymbols"] = args.app_server_symbols_archive
         try:
             write_evidence(
                 args.manifest,
@@ -524,7 +848,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.target,
                 args.channel,
                 args.fork_commit,
-                args.archive,
+                archives,
                 package_metadata,
                 manifest,
                 args.passed_gate,
