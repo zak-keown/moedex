@@ -17,9 +17,9 @@ status: issues_found
 dispositions:
   fixed: 1
   stale: 0
-  skipped: 1
+  skipped: 2
   deferred: 0
-  open: 258
+  open: 257
 ---
 
 # Codebase Review — moedex
@@ -141,6 +141,10 @@ This is exactly the class of input the module's own tests say must never survive
 
 Fix: for the SCP-style branch, do not trust `url.password().is_none()` as proof there is no embedded secret — either reject/strip any `@` found within `gix_url`'s reported `path` when a leading `user@`/`host:` prefix was present, or perform the same manual `rsplit_once('@')`-based stripping used in the `scheme://` branch directly against the raw text before consulting `gix_url`'s structured fields.
 
+**Disposition:** skipped
+**Commit:** —
+**Resolved:** 2026-09-11
+**Note:** False positive under git/gix SCP semantics: everything after the host's first ':' is an opaque PATH, not userinfo. Probed gix directly: 'git@evil:s3cr3t@host:path' parses to user=git, host=evil, path='s3cr3t@host:path' — 's3cr3t' is path content, not a credential. It is structurally IDENTICAL to the legitimate remote 'git@host:path/with@sign/repo.git' (user=git, host=host, path='path/with@sign/repo.git'), so no rule can strip/reject the report's examples without corrupting valid SCP paths that legitimately contain '@'. SCP form has no password field (SSH auth uses keys); real credential-bearing forms (https://, ssh://user:pass@) are already handled correctly by the scheme:// branch. Preserve-verbatim is correct here. No code changed. See task-observer obs 0003.
 ### CR-004: Legacy rollout migration silently discards unparseable lines instead of failing or preserving them
 **File:** `codex-rs/thread-store/src/local/rollout_migration.rs`
 **Anchor:** `let line = line_parser::parse_legacy_rollout_line(bytes).unwrap_or(None);` in `read_rollout_record`
