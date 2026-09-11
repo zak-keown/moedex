@@ -18,8 +18,8 @@ dispositions:
   fixed: 21
   stale: 0
   skipped: 1
-  deferred: 3
-  open: 235
+  deferred: 4
+  open: 234
 ---
 
 # Codebase Review — moedex
@@ -471,6 +471,10 @@ simply stop treating an unauthenticated local cache as authoritative and always
 revalidate `enterprise_managed` policy against a server-issued signature/JWT instead of
 a locally-computed HMAC using a key that ships with the client).
 
+**Disposition:** deferred
+**Commit:** —
+**Resolved:** 2026-09-11
+**Note:** Premise verified: CLOUD_CONFIG_BUNDLE_CACHE_WRITE_HMAC_KEY is a compile-time literal shipped verbatim in the open-source binary, and service.rs load_startup_bundle returns Ok(bundle) directly on CachedBundleLookup::Hit (line ~201), so a signature-valid, non-expired, identity-matching cache is adopted as active enterprise policy with no network round-trip; validate_bundle only checks the TOML parses/composes. Not attempted because there is no sound client-only fix: any key embedded in the public binary is knowable to the local authenticated user (the very party enterprise_managed policy constrains), and the OS-keychain alternative still fails against that same local actor who can read their own login keychain. The only correct remediation is server-issued signatures/JWT verified with a public key (never holding a signing key client-side), which requires backend support absent from this repository. Nothing touched.
 ### CR-011: Apply/preflight "in flight" flags get stuck forever after the modal is dismissed mid-run
 **File:** `codex-rs/cloud-tasks/src/lib.rs`
 **Anchor:** `app::AppEvent::ApplyFinished { id, result }`
