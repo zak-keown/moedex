@@ -610,6 +610,7 @@ fn destination_thread_ids_with_snapshot_reader(
                 ),
             ));
         }
+        validate_codex_rollout(&snapshot.bytes)?;
         thread_ids.insert(codex_rollout_thread_id(&snapshot.bytes)?);
     }
     Ok(thread_ids)

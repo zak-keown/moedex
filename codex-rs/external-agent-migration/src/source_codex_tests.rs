@@ -534,6 +534,23 @@ fn destination_inventory_rejects_unparseable_rollouts() {
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
 }
 
+#[test]
+fn destination_inventory_rejects_invalid_records_after_valid_session_metadata() {
+    let root = TempDir::new().expect("tempdir");
+    let rollout = root.path().join("sessions/rollout.jsonl");
+    fs::create_dir_all(rollout.parent().expect("parent")).expect("sessions");
+    fs::write(
+        &rollout,
+        format!("{}not valid json\n", valid_rollout_line(root.path())),
+    )
+    .expect("rollout");
+
+    let error = destination_thread_ids(root.path())
+        .expect_err("invalid trailing destination record must block inventory");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+}
+
 #[tokio::test]
 async fn source_discovery_rejects_too_many_rollouts_before_reading_them() {
     let root = TempDir::new().expect("tempdir");

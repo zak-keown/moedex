@@ -57,3 +57,13 @@ Validation:
 - `just test -p codex-external-agent-migration source_codex`: 26 passed, 169 skipped.
 - `just fix -p codex-external-agent-migration`: completed.
 - `just fmt`: completed last; tests were not rerun afterward as required.
+
+## Re-review round 2 fix
+
+Destination inventory now validates every record in each bounded immutable rollout snapshot before extracting its thread ID. A regression with valid session metadata followed by malformed JSON proves that trailing corruption blocks inventory and import.
+
+Validation:
+
+- `just test -p codex-external-agent-migration source_codex`: 27 passed, 169 skipped.
+- `just fix -p codex-external-agent-migration`: completed.
+- `just fmt`: completed last; tests were not rerun afterward as required.
