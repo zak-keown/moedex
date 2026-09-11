@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 23
+  fixed: 24
   stale: 0
   skipped: 1
   deferred: 6
-  open: 230
+  open: 229
 ---
 
 # Codebase Review — moedex
@@ -808,6 +808,10 @@ content. The startup-context builder should follow the same rule — log sizes/f
 already does so one line above via `debug!(approx_tokens = ..., bytes = ..., ...)`), not the
 rendered content itself.
 
+**Disposition:** fixed
+**Commit:** `bb73eca813`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-021: Raw realtime user text logged via `debug!`, inconsistent with the module's own credential-safety rule
 **File:** `codex-rs/core/src/realtime_conversation.rs`
 **Anchor:** `debug!(text = %params.text, "[realtime-text] appending realtime conversation text input");` in `handle_text`
