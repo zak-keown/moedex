@@ -17,9 +17,9 @@ status: issues_found
 dispositions:
   fixed: 16
   stale: 0
-  skipped: 1
+  skipped: 2
   deferred: 3
-  open: 240
+  open: 239
 ---
 
 # Codebase Review — moedex
@@ -1041,6 +1041,10 @@ This is inconsistent with the rest of the codebase's established convention for 
 
 Fix: run the same authority/query redaction used in `redact_url_token`/`redact_sensitive_url_parts` over each proxy value before it is placed in `FeedbackDiagnostic::details`.
 
+**Disposition:** skipped
+**Commit:** —
+**Resolved:** 2026-09-11
+**Note:** Premise confirmed: collect_from_pairs copies proxy env values (incl. userinfo/query) verbatim, and attachment_text is uploaded to Sentry. BUT the redaction fix conflicts with explicit, deliberately-tested intent: three tests assert verbatim reporting — collect_from_pairs_reports_raw_values_and_attachment (its fixture is literally https://user:password@secure-proxy.example.com:443?secret=1, asserted reproduced byte-for-byte), collect_from_pairs_reports_values_verbatim, and collect_from_pairs_preserves_whitespace_and_empty_values. Any userinfo/query redaction turns all three red. Per the skill's rule against silently rewriting maintainer intent-encoding tests, escalating rather than forcing. Recommended (needs a maintainer decision): redact URL userinfo + query (mirroring login::redact_sensitive_url_parts / doctor::redact_url_token, the codebase's own convention for this data class), keeping scheme/host/port, and update the three tests to assert the redacted form. Nothing touched.
 ### CR-029: OTEL trace WebSocket listener has no auth and no loopback enforcement, unlike its sibling
 **File:** `codex-rs/otel-trace-websocket/src/lib.rs`
 **Anchor:** `TraceWebSocket::start`
