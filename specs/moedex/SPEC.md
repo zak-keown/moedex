@@ -19,6 +19,7 @@ This request authorizes specification work. Package publication, product impleme
 | [EXPERIENCE.md](EXPERIENCE.md) | U1–U11 and P1–P2: operator controls, history policy, attachments, messaging. |
 | [RESEARCH.md](RESEARCH.md) | C1–C15 and P3–P5: context, research, editing, providers, evidence and provenance. |
 | [TRACEABILITY.md](TRACEABILITY.md) | Complete feature-to-contract and delivery-stage map. |
+| [MAINTENANCE.md](MAINTENANCE.md) | Proposed six-priority maintenance supplement: release ownership, portable CI, verification policy, advisory lint, telemetry, and community automation. Adds no completed implementation stages. |
 
 The [baseline audit](../../FORK-BASELINE.md) is pinned to `8e2afc09126c0cea4c282725fe68af43adad73d7`. Existing goals, hooks, messages, partial-history spawning, queues, compaction, code mode, worktrees, plugins, themes and memory are foundations to extend. The catalog supplies donor evidence, not normative behavior. Where a donor's behavior conflicts with this specification, this specification controls the proposed Moedex design. Repository/user instructions remain authoritative over it.
 
