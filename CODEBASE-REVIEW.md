@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 6
+  fixed: 7
   stale: 0
   skipped: 1
   deferred: 0
-  open: 253
+  open: 252
 ---
 
 # Codebase Review — moedex
@@ -1120,6 +1120,10 @@ n) inside the same `try` that wraps the API call, and catch `SystemExit`/`Instal
 "expected" failures alongside `Exception` so a single bad job degrades to "job failed" instead of
 "batch aborted."
 
+**Disposition:** fixed
+**Commit:** `3466de89b5`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-033: Recursive spawn-descendant queries hang forever on a cyclic thread-spawn graph
 **File:** `codex-rs/state/src/runtime/threads.rs`
 **Anchor:** `list_thread_spawn_descendants_matching`
