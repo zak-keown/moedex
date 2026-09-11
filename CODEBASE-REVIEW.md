@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 1
+  fixed: 2
   stale: 0
   skipped: 2
   deferred: 0
-  open: 257
+  open: 256
 ---
 
 # Codebase Review — moedex
@@ -201,6 +201,10 @@ surrounding machinery already supports), or (b) at minimum be recorded (count, b
 bytes) in the outcome so the loss is visible and recoverable, rather than being silently
 indistinguishable from a deliberate skip.
 
+**Disposition:** fixed
+**Commit:** `e29d93f049`
+**Resolved:** 2026-09-11
+**Note:** —
 ## High
 
 ### CR-005: Stale `MANIFEST_FEATURE_EXCEPTIONS` entry makes a required repo-check fail unconditionally on HEAD
