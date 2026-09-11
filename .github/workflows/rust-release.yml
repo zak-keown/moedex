@@ -1586,6 +1586,16 @@ jobs:
         uses: ./.github/actions/setup-msvc-env
         with:
           target: ${{ matrix.target }}
+      - name: Qualify public installer uninstall safety
+        shell: bash
+        run: |
+          python scripts/codex_package/test_public_brand_inventory.py -q
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            python scripts/install/test_install_ps1.py -q
+          else
+            python3 scripts/install/test_install_sh.py -q
+            python3 scripts/install/test_install_ps1.py -q
+          fi
       - name: Exercise assembled archives with conflicting PATH
         shell: bash
         run: |

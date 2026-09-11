@@ -74,6 +74,9 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertNotIn("not debug_symbols", qualification)
         self.assertIn("test_symbol_archives.py", qualification)
         self.assertIn("test_missing_required_helper_fails_qualification", qualification)
+        self.assertIn("scripts/install/test_install_sh.py -q", qualification)
+        self.assertIn("scripts/install/test_install_ps1.py -q", qualification)
+        self.assertIn("test_public_brand_inventory.py -q", qualification)
         self.assertNotIn("provisioned-macos-candidate", qualification)
         self.assertIn("needs.qualify-release-packages.result == 'success'", unix)
 
