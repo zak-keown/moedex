@@ -241,27 +241,89 @@ def code_mode_host_debug_symbols(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Path:
     target = pytestconfig.getoption("package_target")
-    binaries = {"codex", "codex-app-server", "codex-code-mode-host"}
-    if "windows" in target:
-        binaries.update({"codex-command-runner", "codex-windows-sandbox-setup"})
+    destination = tmp_path_factory.mktemp("codex-debug-symbols")
+    return extract_code_mode_host_debug_symbols(
+        target,
+        pytestconfig.getoption("cli_symbols_archive"),
+        pytestconfig.getoption("app_server_symbols_archive"),
+        destination,
+    )
 
-    if "apple-darwin" in target:
+
+def extract_code_mode_host_debug_symbols(
+    target: str,
+    cli_symbols_archive: Path,
+    app_server_symbols_archive: Path | None,
+    destination: Path,
+) -> Path:
+    if "windows" in target:
+        expected = {
+            "moedex",
+            "codex-app-server",
+            "codex-code-mode-host",
+            "codex-command-runner",
+            "codex-responses-api-proxy",
+            "codex-windows-sandbox-setup",
+        }
+        host_symbols = _validate_symbols_archive(
+            cli_symbols_archive,
+            target,
+            expected,
+            destination,
+            label="combined Windows",
+        )
+        assert host_symbols is not None
+        return host_symbols
+
+    host_symbols = _validate_symbols_archive(
+        cli_symbols_archive,
+        target,
+        {"moedex", "codex-code-mode-host", "codex-responses-api-proxy"},
+        destination,
+        label="CLI",
+    )
+    assert host_symbols is not None
+    assert app_server_symbols_archive is not None, "missing app-server symbols archive"
+    _validate_symbols_archive(
+        app_server_symbols_archive,
+        f"{target}-app-server",
+        {"codex-app-server", "codex-code-mode-host"},
+        destination,
+        label="app-server",
+        extract_host=False,
+    )
+    return host_symbols
+
+
+def _validate_symbols_archive(
+    archive_path: Path,
+    artifact_name: str,
+    binaries: set[str],
+    destination: Path,
+    *,
+    label: str,
+    extract_host: bool = True,
+) -> Path | None:
+    root = f"codex-symbols-{artifact_name}"
+    if "apple-darwin" in artifact_name:
         markers = {
             binary: f"/{binary}.dSYM/Contents/Resources/DWARF/" for binary in binaries
         }
     else:
-        extension = "pdb" if "windows" in target else "debug"
+        extension = "pdb" if "windows" in artifact_name else "debug"
         markers = {binary: f"/{binary}.{extension}" for binary in binaries}
 
-    destination = tmp_path_factory.mktemp("codex-debug-symbols")
     found: set[str] = set()
     symbol_path = None
-    with tarfile.open(pytestconfig.getoption("symbols_archive"), "r|gz") as archive:
+    with tarfile.open(archive_path, "r|gz") as archive:
         for member in archive:
             if not member.isfile():
                 continue
+            assert member.name.startswith(f"{root}/"), (
+                f"{label} symbols archive has wrong root: {member.name}"
+            )
             for binary, marker in markers.items():
-                if "apple-darwin" in target:
+                if "apple-darwin" in artifact_name:
                     _, found_marker, dwarf_name = member.name.partition(marker)
                     matches = bool(
                         found_marker and dwarf_name and "/" not in dwarf_name
@@ -271,10 +333,11 @@ def code_mode_host_debug_symbols(
                 if not matches:
                     continue
                 found.add(binary)
-                if binary == "codex-code-mode-host":
+                if binary == "codex-code-mode-host" and extract_host:
                     archive.extract(member, destination, filter="data")
                     symbol_path = destination / member.name
                 break
-    assert found == binaries, found
-    assert symbol_path is not None
+    assert found == binaries, f"{label} symbols mismatch: {found}"
+    if extract_host:
+        assert symbol_path is not None, f"{label} code-mode host symbols missing"
     return symbol_path
