@@ -932,3 +932,175 @@ def test_focused_rust_gates_are_bounded_and_reference_known_tests() -> None:
         "python3",
         "scripts/codex_package/test_public_brand_inventory.py",
     ]
+
+
+def test_focused_rust_gate_listing_rejects_a_zero_test_selector(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    gate = {
+        "cwd": "codex-rs",
+        "argv": ["just", "test", "-p", "codex-build-info", "missing-test"],
+    }
+    listing = {
+        "rust-suites": {
+            "codex-build-info": {
+                "testcases": {
+                    "tests::real_test": {
+                        "filter-match": {"status": "mismatch", "reason": "string"}
+                    }
+                }
+            }
+        }
+    }
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert argv == [
+            "cargo",
+            "nextest",
+            "list",
+            "--message-format",
+            "json",
+            "-p",
+            "codex-build-info",
+            "missing-test",
+        ]
+        assert kwargs["cwd"] == tmp_path
+        return subprocess.CompletedProcess(argv, 0, json.dumps(listing), "")
+
+    monkeypatch.setattr(behavior.subprocess, "run", fake_run)
+
+    assert behavior.verify_rust_gate_selection(gate, tmp_path) == (
+        False,
+        "focused Rust gate selected zero tests",
+    )
+
+
+def test_focused_rust_gate_listing_counts_matching_tests() -> None:
+    listing = {
+        "rust-suites": {
+            "crate": {
+                "testcases": {
+                    "tests::selected": {"filter-match": {"status": "matches"}},
+                    "tests::filtered": {"filter-match": {"status": "mismatch"}},
+                }
+            }
+        }
+    }
+
+    assert behavior.selected_test_count(json.dumps(listing)) == 1
+
+
+def test_run_gates_rejects_zero_selected_tests_before_execution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "gates": {
+                    "identity": {
+                        "cwd": ".",
+                        "argv": ["just", "test", "-p", "crate", "missing"],
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(behavior, "verify", lambda *args: ([], {}))
+    monkeypatch.setattr(behavior, "verify_git_ancestry", lambda *args: [])
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        listing = {
+            "rust-suites": {
+                "crate": {
+                    "testcases": {
+                        "tests::real": {
+                            "filter-match": {"status": "mismatch", "reason": "string"}
+                        }
+                    }
+                }
+            }
+        }
+        return subprocess.CompletedProcess(argv, 0, json.dumps(listing), "")
+
+    monkeypatch.setattr(behavior.subprocess, "run", fake_run)
+
+    assert (
+        behavior.main(
+            [
+                "--manifest",
+                str(manifest_path),
+                "--repo-root",
+                str(tmp_path),
+                "run-gates",
+                "--gate",
+                "identity",
+            ]
+        )
+        == 4
+    )
+    assert calls == [
+        [
+            "cargo",
+            "nextest",
+            "list",
+            "--message-format",
+            "json",
+            "-p",
+            "crate",
+            "missing",
+        ]
+    ]
+
+
+def test_run_gates_lists_then_executes_a_matching_rust_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    gate_argv = ["just", "test", "-p", "crate", "selected"]
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "gates": {"identity": {"cwd": ".", "argv": gate_argv}},
+                "requirements": [],
+            }
+        )
+    )
+    monkeypatch.setattr(behavior, "verify", lambda *args: ([], {}))
+    monkeypatch.setattr(behavior, "verify_git_ancestry", lambda *args: [])
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if argv[0] == "cargo":
+            listing = {
+                "rust-suites": {
+                    "crate": {
+                        "testcases": {
+                            "tests::selected": {"filter-match": {"status": "matches"}}
+                        }
+                    }
+                }
+            }
+            return subprocess.CompletedProcess(argv, 0, json.dumps(listing), "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(behavior.subprocess, "run", fake_run)
+
+    assert (
+        behavior.main(
+            [
+                "--manifest",
+                str(manifest_path),
+                "--repo-root",
+                str(tmp_path),
+                "run-gates",
+                "--gate",
+                "identity",
+            ]
+        )
+        == 0
+    )
+    assert calls[-1] == gate_argv

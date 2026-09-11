@@ -214,7 +214,15 @@ mod tests {
             "1.2.3"
         );
         assert_eq!(
+            json["checks"]["runtime.provenance"]["details"]["version"],
+            "1.2.3"
+        );
+        assert_eq!(
             json["checks"]["runtime.provenance"]["details"]["fork commit"],
+            "fork-commit"
+        );
+        assert_eq!(
+            json["checks"]["runtime.provenance"]["details"]["commit"],
             "fork-commit"
         );
         assert_eq!(

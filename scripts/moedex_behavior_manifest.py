@@ -1082,6 +1082,56 @@ def run_package_journeys(repo_root: Path) -> int:
     ).returncode
 
 
+def rust_gate_listing_argv(gate: dict[str, Any]) -> list[str] | None:
+    argv = gate["argv"]
+    if argv[:2] != ["just", "test"]:
+        return None
+    return ["cargo", "nextest", "list", "--message-format", "json", *argv[2:]]
+
+
+def selected_test_count(listing: str) -> int:
+    try:
+        payload = json.loads(listing)
+    except json.JSONDecodeError as error:
+        raise ValueError("nextest listing was not valid JSON") from error
+    suites = payload.get("rust-suites")
+    if not isinstance(suites, dict):
+        raise ValueError("nextest listing omitted rust-suites")
+    return sum(
+        1
+        for suite in suites.values()
+        if isinstance(suite, dict)
+        for testcase in suite.get("testcases", {}).values()
+        if isinstance(testcase, dict)
+        and testcase.get("filter-match", {}).get("status") == "matches"
+    )
+
+
+def verify_rust_gate_selection(gate: dict[str, Any], cwd: Path) -> tuple[bool, str]:
+    listing_argv = rust_gate_listing_argv(gate)
+    if listing_argv is None:
+        return True, ""
+    result = subprocess.run(
+        listing_argv,
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode:
+        return (
+            False,
+            f"test listing failed with {result.returncode}: {result.stderr.strip()}",
+        )
+    try:
+        count = selected_test_count(result.stdout)
+    except ValueError as error:
+        return False, str(error)
+    if count == 0:
+        return False, "focused Rust gate selected zero tests"
+    return True, ""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path, default=MANIFEST_PATH)
@@ -1131,10 +1181,16 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         for name in args.gate:
             gate = manifest["gates"][name]
+            gate_cwd = args.repo_root / gate["cwd"]
+            selection_ok, selection_error = verify_rust_gate_selection(gate, gate_cwd)
+            if not selection_ok:
+                print(
+                    f"error: gate {name} {selection_error}",
+                    file=sys.stderr,
+                )
+                return 4
             print(f"running gate {name}: {' '.join(gate['argv'])}", flush=True)
-            result = subprocess.run(
-                gate["argv"], cwd=args.repo_root / gate["cwd"], check=False
-            )
+            result = subprocess.run(gate["argv"], cwd=gate_cwd, check=False)
             if result.returncode:
                 print(
                     f"error: gate {name} failed with {result.returncode}",

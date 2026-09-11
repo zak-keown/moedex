@@ -32,6 +32,7 @@ use codex_api::ApiError;
 use codex_api::ResponsesWebsocketClient;
 use codex_api::is_azure_responses_provider;
 use codex_arg0::Arg0DispatchPaths;
+use codex_build_info::BuildInfo;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
 use codex_core::config::Config;
@@ -570,12 +571,15 @@ async fn build_report(
 
     progress.settle();
 
-    let overall_status = overall_status(&checks);
+    assemble_report(BuildInfo::get(), checks)
+}
+
+fn assemble_report(build_info: BuildInfo, checks: Vec<DoctorCheck>) -> DoctorReport {
     DoctorReport {
         schema_version: 1,
         generated_at: generated_at(),
-        overall_status,
-        codex_version: env!("CARGO_PKG_VERSION").to_string(),
+        overall_status: overall_status(&checks),
+        codex_version: build_info.version().to_string(),
         checks,
     }
 }
@@ -722,7 +726,8 @@ fn redacted_json_report(report: &DoctorReport) -> JsonDoctorReport {
 }
 
 fn redacted_json_check(check: &DoctorCheck) -> JsonDoctorCheck {
-    let (details, notes) = structured_json_details(&check.details);
+    let (mut details, notes) = structured_json_details(&check.details);
+    add_schema_v1_detail_aliases(check.id.as_str(), &mut details);
     JsonDoctorCheck {
         id: check.id.clone(),
         category: check.category.clone(),
@@ -733,6 +738,26 @@ fn redacted_json_check(check: &DoctorCheck) -> JsonDoctorCheck {
         notes,
         remediation: check.remediation.as_deref().map(redact_detail),
         duration_ms: check.duration_ms,
+    }
+}
+
+fn add_schema_v1_detail_aliases(check_id: &str, details: &mut BTreeMap<String, JsonDetailValue>) {
+    const RUNTIME_ALIASES: &[(&str, &str)] = &[
+        ("distribution version", "version"),
+        ("fork commit", "commit"),
+    ];
+    const HOME_ALIASES: &[(&str, &str)] = &[("effective home", "CODEX_HOME")];
+    let aliases = match check_id {
+        "runtime.provenance" => RUNTIME_ALIASES,
+        "config.load" | "state.paths" | "state.home" => HOME_ALIASES,
+        _ => &[],
+    };
+    for (source, alias) in aliases {
+        if !details.contains_key(*alias)
+            && let Some(value) = details.get(*source).cloned()
+        {
+            details.insert((*alias).to_string(), value);
+        }
     }
 }
 
@@ -3228,6 +3253,10 @@ mod tests {
             canonical_codex.display().to_string()
         );
         assert_eq!(
+            json["checks"]["state.home"]["details"]["CODEX_HOME"],
+            canonical_codex.display().to_string()
+        );
+        assert_eq!(
             json["checks"]["state.home"]["details"]["home source"],
             "CODEX_HOME compatibility"
         );
@@ -3235,6 +3264,37 @@ mod tests {
             json["checks"]["state.home"]["details"]["shares stock Codex state"],
             "yes"
         );
+    }
+
+    #[test]
+    fn report_header_uses_the_distribution_version() {
+        let report = assemble_report(BuildInfo::from_version("1.2.3"), Vec::new());
+
+        assert_eq!(report.codex_version, "1.2.3");
+        let human = render_human_report(
+            &report,
+            HumanOutputOptions {
+                show_details: true,
+                show_all: false,
+                ascii: true,
+                color_enabled: false,
+            },
+        );
+        assert!(human.contains("Moedex Doctor v1.2.3"));
+        insta::assert_snapshot!("doctor_distribution_version_header", human);
+        let json = serde_json::to_value(redacted_json_report(&report)).expect("serialize report");
+        assert_eq!(json["codexVersion"], "1.2.3");
+    }
+
+    #[test]
+    fn schema_v1_home_alias_is_preserved_in_normal_and_fallback_checks() {
+        for id in ["config.load", "state.paths"] {
+            let check = DoctorCheck::new(id, "state", CheckStatus::Ok, "home resolved")
+                .detail("effective home: /tmp/moedex");
+            let json = serde_json::to_value(redacted_json_check(&check)).expect("serialize check");
+            assert_eq!(json["details"]["effective home"], "/tmp/moedex");
+            assert_eq!(json["details"]["CODEX_HOME"], "/tmp/moedex");
+        }
     }
 
     #[test]
