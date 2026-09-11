@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 25
+  fixed: 26
   stale: 0
   skipped: 1
   deferred: 6
-  open: 228
+  open: 227
 ---
 
 # Codebase Review — moedex
@@ -879,6 +879,10 @@ that only lists variable *names*, not values), and rely on the existing
 `NON_INHERITABLE_ENV_VARS` scrub purely for its documented purpose (preventing launch
 context leakage) rather than as a secret-redaction mechanism for this log line.
 
+**Disposition:** fixed
+**Commit:** `72f3dad570`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-023: Windows fs-sandbox helper is trusted to name its own OpenProcess/DuplicateHandle target
 **File:** `codex-rs/exec-server/src/sandboxed_file_open.rs`
 **Anchor:** `duplicate_file_handle`
