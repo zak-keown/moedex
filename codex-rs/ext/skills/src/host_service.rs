@@ -84,7 +84,6 @@ pub struct HostSkillsService {
     codex_home: AbsolutePathBuf,
     restriction_product: Option<Product>,
     extra_roots: RwLock<Vec<AbsolutePathBuf>>,
-    cache_by_cwd: RwLock<HashMap<AbsolutePathBuf, HostSkillsSnapshot>>,
     cache_by_config: RwLock<VecDeque<ConfigSkillsCacheEntry>>,
     // Shared across cwds so root scheduling cannot multiply per-root I/O fanout.
     root_scan_slots: Arc<Semaphore>,
@@ -131,7 +130,6 @@ impl HostSkillsService {
             codex_home,
             restriction_product,
             extra_roots: RwLock::new(Vec::new()),
-            cache_by_cwd: RwLock::new(HashMap::new()),
             cache_by_config: RwLock::new(VecDeque::new()),
             root_scan_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_ROOT_SCANS)),
         };
@@ -248,14 +246,12 @@ impl HostSkillsService {
         if bundled_skills_enabled {
             self.ensure_system_skills_installed();
         }
+        // Snapshots are cached only by the effective skill-relevant config state
+        // (see `cache_by_config` in `snapshot_for_skill_roots`), never by cwd
+        // alone: a bare cwd -> snapshot cache would let one session's skill
+        // enable/disable decisions (session flags, `[[skills.config]]` rules)
+        // bleed into another session that merely shares the same directory.
         let use_cwd_cache = fs.is_some();
-        let cache_snapshot_by_cwd = use_cwd_cache && input.effective_skill_roots.is_empty();
-        if cache_snapshot_by_cwd
-            && !force_reload
-            && let Some(snapshot) = self.cached_snapshot_for_cwd(&input.cwd)
-        {
-            return snapshot;
-        }
 
         let mut roots = resolve_skill_roots(
             fs.clone(),
@@ -290,13 +286,6 @@ impl HostSkillsService {
                     .await,
             ))
         };
-        if cache_snapshot_by_cwd {
-            let mut cache = self
-                .cache_by_cwd
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            cache.insert(input.cwd.clone(), snapshot.clone());
-        }
         snapshot
     }
 
@@ -373,16 +362,7 @@ impl HostSkillsService {
     }
 
     pub fn clear_cache(&self) {
-        let cleared_cwd = {
-            let mut cache = self
-                .cache_by_cwd
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let cleared = cache.len();
-            cache.clear();
-            cleared
-        };
-        let cleared_config = {
+        let cleared = {
             let mut cache = self
                 .cache_by_config
                 .write()
@@ -391,15 +371,7 @@ impl HostSkillsService {
             cache.clear();
             cleared
         };
-        let cleared = cleared_cwd + cleared_config;
         info!("skills cache cleared ({cleared} entries)");
-    }
-
-    fn cached_snapshot_for_cwd(&self, cwd: &AbsolutePathBuf) -> Option<HostSkillsSnapshot> {
-        match self.cache_by_cwd.read() {
-            Ok(cache) => cache.get(cwd).cloned(),
-            Err(err) => err.into_inner().get(cwd).cloned(),
-        }
     }
 
     fn extra_roots(&self) -> Vec<AbsolutePathBuf> {
