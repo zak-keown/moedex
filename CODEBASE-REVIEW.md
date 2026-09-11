@@ -18,8 +18,8 @@ dispositions:
   fixed: 15
   stale: 0
   skipped: 1
-  deferred: 1
-  open: 243
+  deferred: 2
+  open: 242
 ---
 
 # Codebase Review — moedex
@@ -1489,6 +1489,10 @@ sync_persistent_deny_read_acls(codex_home, readonly_sid_str, additional_deny_rea
 
 The asymmetry (allow-ACE failures failing closed vs. deny-ACE failures failing open) suggests this is an oversight rather than an intentional best-effort design. Fix: propagate (or at minimum log at `log_note`/error level and abort the spawn on) failures from `add_deny_write_ace`, matching the deny-read path's error handling.
 
+**Disposition:** deferred
+**Commit:** —
+**Resolved:** 2026-09-11
+**Note:** Premise confirmed: spawn_prep.rs:303 does 'let _ = add_deny_write_ace(p, root_sid.sid.as_ptr());', swallowing deny-write ACL failures (fails open) while the deny-read path uses '?'. Note the crate uses 'let _ =' for several other ACE ops too (allow/workspace-protect at 291/298/340/341), so it is a broader best-effort pattern, not solely deny-write — a maintainer should decide propagate-vs-log per op. Environment-blocked: windows-sandbox-rs is #[cfg(target_os = "windows")] and cannot be compiled/tested here. Recommended fix (Windows follow-up): propagate (or log-and-abort) add_deny_write_ace failures, matching sync_persistent_deny_read_acls.
 ### CR-041: Provisioning pipe authorization silently accepts unpackaged clients when the service itself is packaged
 **File:** `codex-rs/windows-sandbox-service/src/package_identity.rs`
 **Anchor:** `authorize_client_process`, arm `None if service_family.is_some() => {}`
