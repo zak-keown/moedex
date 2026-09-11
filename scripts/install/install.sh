@@ -737,7 +737,15 @@ cleanup_stale_install_artifacts() {
   find "$STANDALONE_ROOT" -mindepth 1 -maxdepth 1 -name '.current.*' -exec rm -f {} +
 
   if [ -d "$BIN_DIR" ]; then
-    find "$BIN_DIR" -mindepth 1 -maxdepth 1 -name '.codex.*' -exec rm -f {} +
+    for stale_link in "$BIN_DIR"/.moedex.*; do
+      [ -L "$stale_link" ] || continue
+      stale_target="$(readlink "$stale_link" 2>/dev/null || true)"
+      case "$stale_target" in
+        "$CURRENT_LINK/bin/moedex" | "$CURRENT_LINK/moedex" | "$CURRENT_LINK/bin/codex-code-mode-host")
+          rm -f "$stale_link"
+          ;;
+      esac
+    done
   fi
 }
 

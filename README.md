@@ -27,7 +27,7 @@ $env:MOEDEX_NON_INTERACTIVE = "1"
 irm https://github.com/zak-keown/moedex/releases/download/rust-v0.1.0/install.ps1 | iex
 ```
 
-Each installer selects the matching target archive, verifies its release digest and embedded payload checksums, and exposes the `moedex` command. Release assets retain per-target behavior evidence tying the package and symbol archive hashes to the fork commit, upstream base, and GitHub release channel.
+Each installer selects the matching target archive, verifies its release and archive digests, and exposes the `moedex` command. Release CI validates the embedded per-payload checksums. Release assets retain per-target behavior evidence tying the package and symbol archive hashes to the fork commit, upstream base, and GitHub release channel.
 
 To build from source instead:
 

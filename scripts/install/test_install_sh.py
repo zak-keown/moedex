@@ -295,6 +295,42 @@ class InstallShTest(unittest.TestCase):
                 ],
             )
 
+    def test_install_cleans_only_recognized_stale_moedex_command_links(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            archive_path, checksum_path, metadata_json = create_package_release(root)
+            install_bin = root / "install-bin"
+            install_bin.mkdir()
+            stock_temporary = install_bin / ".codex.interrupted"
+            stock_temporary.write_text("stock installer state\n", encoding="utf-8")
+            user_moedex_file = install_bin / ".moedex.notes"
+            user_moedex_file.write_text("user data\n", encoding="utf-8")
+            stale_moedex_link = install_bin / ".moedex.interrupted"
+            stale_moedex_link.symlink_to(
+                root
+                / "codex-home"
+                / "packages"
+                / "standalone"
+                / "current"
+                / "bin"
+                / "moedex"
+            )
+
+            result, _requests = run_installer_in(
+                root,
+                VERSION,
+                metadata_json=metadata_json,
+                archive_path=archive_path,
+                checksum_path=checksum_path,
+                force_macos=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(stock_temporary.read_text(), "stock installer state\n")
+            self.assertEqual(user_moedex_file.read_text(), "user data\n")
+            self.assertFalse(stale_moedex_link.exists())
+            self.assertFalse(stale_moedex_link.is_symlink())
+
     def test_explicit_release_pins_even_the_current_latest_version(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
