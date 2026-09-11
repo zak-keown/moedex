@@ -483,11 +483,27 @@ def verify_source_inventory(manifest: dict[str, Any], repo_root: Path) -> list[s
                 any(part in excluded_directories for part in relative.parts)
                 or any(relative.match(pattern) for pattern in excluded_globs)
                 or path.suffix not in extensions
-                or not path.is_file()
             ):
                 continue
+            if path.is_symlink():
+                errors.append(f"policy scan file is a symlink: {relative.as_posix()}")
+                continue
             try:
-                policy_contents[relative.as_posix()] = path.read_text(encoding="utf-8")
+                resolved = path.resolve(strict=True)
+            except FileNotFoundError:
+                errors.append(f"missing policy scan file: {relative.as_posix()}")
+                continue
+            if resolved_repo != resolved and resolved_repo not in resolved.parents:
+                errors.append(
+                    f"policy scan file escapes repository: {relative.as_posix()}"
+                )
+                continue
+            if not resolved.is_file():
+                continue
+            try:
+                policy_contents[relative.as_posix()] = resolved.read_text(
+                    encoding="utf-8"
+                )
             except UnicodeDecodeError:
                 continue
     allowed = {

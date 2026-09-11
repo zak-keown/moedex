@@ -42,7 +42,7 @@ def fixture_manifest() -> dict:
         "files": ["surface.txt", "second.txt"],
         "discoveryGlobs": ["*.txt"],
         "policyScan": {
-            "roots": [".github/workflows"],
+            "roots": [".github"],
             "extensions": [".txt", ".yml"],
             "excludedDirectories": ["vendor"],
             "excludedFileGlobs": ["test_*"],
@@ -228,6 +228,16 @@ def test_repository_manifest_is_complete_and_strict() -> None:
     assert all("exclusions" in entry for entry in manifest["requirements"])
 
 
+def test_repository_policy_scans_all_github_automation_with_exact_v8_allowance() -> None:
+    policy = repository_manifest()["sourceInventory"]["policyScan"]
+    assert ".github" in policy["roots"]
+    assert any(
+        item["path"] == ".github/actions/setup-rusty-v8/action.yml"
+        and item["count"] == 1
+        for item in policy["allowedOccurrences"]
+    )
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
@@ -369,6 +379,42 @@ def test_policy_scan_rejects_realistically_named_new_publish_workflow(
     errors = behavior.verify_source_inventory(manifest, tmp_path)
 
     assert any("policy scan forbidden target" in error for error in errors)
+
+
+def test_policy_scan_rejects_new_reusable_publish_action(tmp_path: Path) -> None:
+    manifest = fixture_manifest()
+    source_fixture(tmp_path)
+    action = tmp_path / ".github/actions/publish/action.yml"
+    action.parent.mkdir(parents=True)
+    action.write_text(
+        "run: curl https://github.com/openai/codex/releases/latest",
+        encoding="utf-8",
+    )
+
+    errors = behavior.verify_source_inventory(manifest, tmp_path)
+
+    assert any("policy scan forbidden target" in error for error in errors)
+
+
+def test_policy_scan_rejects_symlinked_file_escaping_repository(
+    tmp_path: Path,
+) -> None:
+    if os.name == "nt":
+        pytest.skip("symlink creation is not generally available")
+    manifest = fixture_manifest()
+    source_fixture(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.yml"
+    outside.write_text(
+        "run: curl https://github.com/openai/codex/releases/latest",
+        encoding="utf-8",
+    )
+    symlink = tmp_path / ".github/actions/escape/action.yml"
+    symlink.parent.mkdir(parents=True)
+    symlink.symlink_to(outside)
+
+    errors = behavior.verify_source_inventory(manifest, tmp_path)
+
+    assert any("policy scan file is a symlink" in error for error in errors)
 
 
 def test_upstream_rebase_mutations_cannot_silently_drop_a_mapped_behavior(

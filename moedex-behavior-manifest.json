@@ -845,8 +845,7 @@
     ],
     "policyScan": {
       "roots": [
-        ".github/workflows",
-        ".github/scripts",
+        ".github",
         "scripts",
         "codex-cli",
         "codex-rs"
@@ -888,6 +887,11 @@
       "allowedOccurrences": [
         {
           "path": "scripts/codex_package/v8.py",
+          "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)",
+          "count": 1
+        },
+        {
+          "path": ".github/actions/setup-rusty-v8/action.yml",
           "pattern": "https?://(?:api\\.)?github\\.com/(?:repos/)?openai/codex/(?:releases|tags|latest)",
           "count": 1
         }
