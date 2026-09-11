@@ -2690,3 +2690,51 @@ async fn migration_skips_malformed_lines_and_trailing_partial_tail() {
     assert_eq!(turns.turns.len(), 1);
     assert_eq!(turns.turns[0].items.len(), 2);
 }
+
+#[tokio::test]
+async fn migration_fails_rather_than_silently_dropping_unrecognized_records() {
+    // A well-formed, content-bearing JSON record whose event type the decoder does
+    // not recognize must NOT be silently discarded while migration reports success
+    // (CR-004). Unlike genuinely malformed (non-JSON) lines, which are skipped to
+    // resynchronize the stream, a decodable-looking record is real content: dropping
+    // it silently is data loss. It must surface as a visible failure with the
+    // original legacy file preserved so the record stays recoverable.
+    let home = TempDir::new().expect("create Codex home");
+    let thread_id = ThreadId::new();
+    let path = write_rollout(
+        home.path(),
+        thread_id,
+        SessionSource::Cli,
+        vec![user_message("kept question")],
+    );
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .expect("open legacy rollout");
+    // Valid JSON, content-bearing, but an event type the decoder cannot handle and
+    // that is not on the retired-record allow-list.
+    writeln!(
+        file,
+        r#"{{"timestamp":"2025-01-03T12:00:00Z","type":"event_msg","payload":{{"type":"unknown_legacy_event"}}}}"#
+    )
+    .expect("append unrecognized record");
+    drop(file);
+    let store = indexed_store(home.path()).await;
+
+    let report = store
+        .migrate_rollouts(apply_options())
+        .await
+        .expect("inspect rollout with an unrecognized record");
+
+    assert_failed_with_reason(
+        &report.outcomes[0],
+        RolloutMigrationFailureReason::LegacyRolloutConversionFailed,
+    );
+    // The original legacy file (and its unrecognized record) must be preserved.
+    assert!(path.exists(), "legacy rollout must be preserved on failure");
+    let preserved = fs::read_to_string(&path).expect("read preserved legacy rollout");
+    assert!(
+        preserved.contains("unknown_legacy_event") && preserved.contains("kept question"),
+        "the original legacy content must remain recoverable"
+    );
+}
