@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 31
+  fixed: 32
   stale: 0
   skipped: 1
   deferred: 6
-  open: 222
+  open: 221
 ---
 
 # Codebase Review — moedex
@@ -953,6 +953,10 @@ a verified working exploit.
 
 `CodexImagesBackend::client` has the same gap as the history-notes backend: it calls the non-route-aware `codex_login::default_client::create_client()` directly, with no `HttpClientFactory` in scope anywhere in this crate. Every `imagegen` generate/edit request therefore bypasses a configured non-default `OutboundProxyPolicy`, in contrast to `codex-rs/ext/guardian-v2/src/async_scorer/sampler/connection_pool.rs`'s explicit use of the factory-aware `create_client_for_route_async`. `ImageGenerationExtensionConfig::from_config` already has access to `&Config` at the point where the backend is constructed (`ImageGenerationExtension::tools`), so `config.http_client_factory()` could be captured into `ImageGenerationExtensionConfig`/`CodexImagesBackend` the same way `provider`/`save_root` already are. Same fix and same severity rationale as the history-notes finding above: an administrator-mandated proxy/custom-CA policy silently does not apply to image-generation traffic.
 
+**Disposition:** fixed
+**Commit:** `bcb3ad2a52`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-026: Skill name/path/contents interpolated unescaped into `<skill>...</skill>` prompt fragment, allowing boundary/tag spoofing from skill content
 
 **File:** `codex-rs/ext/skills/src/fragments.rs`
