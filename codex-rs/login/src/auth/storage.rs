@@ -271,7 +271,10 @@ impl FileAuthStorage {
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| std::io::Error::other("auth filename is not UTF-8"))?;
-        let temp = parent.join(format!(".{file_name}.{}.{sequence}.tmp", std::process::id()));
+        let temp = parent.join(format!(
+            ".{file_name}.{}.{sequence}.tmp",
+            std::process::id()
+        ));
         let json_data = serde_json::to_vec_pretty(auth)?;
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
@@ -705,10 +708,7 @@ impl AuthStorageBackend for SecretsKeyringAuthStorage {
                 warn!("{message}");
                 std::io::Error::other(message)
             })?;
-        if let Err(err) = delete_file_if_exists(
-            &self.codex_home,
-            self.direct_storage.namespace,
-        ) {
+        if let Err(err) = delete_file_if_exists(&self.codex_home, self.direct_storage.namespace) {
             warn!("failed to remove CLI auth fallback file: {err}");
         }
         Ok(())

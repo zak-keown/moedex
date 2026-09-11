@@ -55,8 +55,18 @@ async fn moedex_identity_wraps_custom_instructions_without_rewriting_resumed_his
     .await;
 
     let initial_request = initial_mock.single_request();
-    assert_eq!(initial_request.instructions_text().matches(MOEDEX_IDENTITY).count(), 1);
-    assert!(initial_request.instructions_text().contains(CUSTOM_INSTRUCTIONS));
+    assert_eq!(
+        initial_request
+            .instructions_text()
+            .matches(MOEDEX_IDENTITY)
+            .count(),
+        1
+    );
+    assert!(
+        initial_request
+            .instructions_text()
+            .contains(CUSTOM_INSTRUCTIONS)
+    );
 
     let rollout_path = initial.codex.rollout_path().expect("rollout path");
     initial.codex.shutdown_and_wait().await?;
@@ -96,7 +106,11 @@ async fn moedex_identity_wraps_custom_instructions_without_rewriting_resumed_his
         serde_json::to_string(&resumed_request.input())?
     );
     assert_eq!(resumed_visible_context.matches(MOEDEX_IDENTITY).count(), 1);
-    assert!(resumed_request.instructions_text().contains(CUSTOM_INSTRUCTIONS));
+    assert!(
+        resumed_request
+            .instructions_text()
+            .contains(CUSTOM_INSTRUCTIONS)
+    );
     assert!(resumed_visible_context.contains("custom historical user bytes"));
     assert!(resumed_visible_context.contains("custom historical assistant bytes"));
     assert!(fs::read(&rollout_path)?.starts_with(&historical_rollout));
