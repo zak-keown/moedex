@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 5
+  fixed: 6
   stale: 0
   skipped: 1
   deferred: 0
-  open: 254
+  open: 253
 ---
 
 # Codebase Review — moedex
@@ -1514,6 +1514,10 @@ Since `Thread.run()` (`sdk/typescript/src/thread.ts`) collects every `item.compl
 
 Fix: add `"declined"` to `CommandExecutionStatus` in `items.ts` to match `codex-rs/exec/src/exec_events.rs`.
 
+**Disposition:** fixed
+**Commit:** `c17a12c51d`
+**Resolved:** 2026-09-11
+**Note:** Union widened to include "declined"; verified against exec_events.rs (variant + snake_case serde rename) and the jsonl event-processor mapping. Pure widening (runtime already emits this value), so it cannot break existing consumers. SDK jest/ts-jest toolchain not installable offline here, so red/green was not executed locally.
 ## Medium
 
 ### CR-044: `--json` CLI flag has no effect anywhere in the program
