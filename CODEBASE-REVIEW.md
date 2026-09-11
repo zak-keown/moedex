@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 32
+  fixed: 33
   stale: 0
   skipped: 1
   deferred: 6
-  open: 221
+  open: 220
 ---
 
 # Codebase Review — moedex
@@ -1167,6 +1167,10 @@ gap in the secrets store stands out.
 Fix: serialize `load_file`+mutate+`save_file` with an OS file lock on the secrets file (or a
 lock file alongside it), mirroring the coordination already used by the rollout writer lock.
 
+**Disposition:** fixed
+**Commit:** `3fe4d56ec2`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-031: `env -C`/`-u` and other value-taking flags bypass the dangerous-command classifier
 **File:** `codex-rs/shell-command/src/command_safety/is_dangerous_command.rs`
 **Anchor:** `dangerous_command_match_for_env`
