@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 29
+  fixed: 30
   stale: 0
   skipped: 1
   deferred: 6
-  open: 224
+  open: 223
 ---
 
 # Codebase Review — moedex
@@ -1070,6 +1070,10 @@ Fix: include the effective skill-relevant config state (e.g. the same
 `snapshot_for_skill_roots`'s config-aware cache instead of a bare
 `cwd -> snapshot` map.
 
+**Disposition:** fixed
+**Commit:** `daf01c8042`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-028: Proxy environment variables are uploaded to Sentry verbatim, leaking embedded credentials
 **File:** `codex-rs/feedback/src/feedback_diagnostics.rs`
 **Anchor:** `FeedbackDiagnostics::collect_from_pairs`
