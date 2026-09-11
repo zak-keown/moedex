@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 7
+  fixed: 8
   stale: 0
   skipped: 1
   deferred: 0
-  open: 252
+  open: 251
 ---
 
 # Codebase Review — moedex
@@ -1507,6 +1507,10 @@ The public entry points `Codex.__init__` (`sdk/python/src/openai_codex/api.py`) 
 
 Fix: thread an optional `approval_handler` parameter through `Codex.__init__`/`AsyncCodex.__init__` (or otherwise expose a supported hook), and consider making the default handler fail closed (or clearly documented as accept-all) rather than silently accepting destructive actions.
 
+**Disposition:** fixed
+**Commit:** `73db41fc1b`
+**Resolved:** 2026-09-11
+**Note:** Core defect fixed: approval_handler now threads through Codex/AsyncCodex/AsyncCodexClient (additive, default None -> behavior unchanged) and ApprovalHandler is re-exported. Default handler left accept-all with an explicit docstring warning (finding's 'clearly documented as accept-all' option); flipping the default to fail-closed is a breaking product decision left to maintainers. All touched files pass py_compile; SDK approval tests are integration tests needing network deps + the app-server binary, so red/green was not executed offline.
 ### CR-043: `CommandExecutionStatus` union is missing the real `"declined"` value emitted by `codex exec`
 **File:** `sdk/typescript/src/items.ts`
 **Anchor:** `export type CommandExecutionStatus = "in_progress" | "completed" | "failed";`
