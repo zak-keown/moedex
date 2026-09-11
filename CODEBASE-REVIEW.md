@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 15
+  fixed: 16
   stale: 0
   skipped: 1
   deferred: 3
-  open: 241
+  open: 240
 ---
 
 # Codebase Review — moedex
@@ -637,6 +637,10 @@ The model sees what looks like a clean, fully-closed `<external_browser_info>...
 
 Fix: validate/allowlist the key charset (e.g. `[a-z0-9_]+`) at the protocol boundary or when constructing the fragment, or escape `<`/`>` in `key` before interpolation, the same way `value` is bounded.
 
+**Disposition:** fixed
+**Commit:** `3049054bf3`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-016: Marketplace `add` git checkout has the same missing SHA-verification gap
 
 **File:** `codex-rs/core-plugins/src/marketplace_add/install.rs`
