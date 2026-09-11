@@ -224,7 +224,7 @@ enum Subcommand {
     /// Fork a previous interactive session (picker by default; use --last to fork the most recent).
     Fork(ForkCommand),
 
-    /// [EXPERIMENTAL] Browse tasks from Moedex Cloud and apply changes locally.
+    /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
     Cloud(CloudTasksCli),
 
@@ -3751,6 +3751,12 @@ mod tests {
         let err = MultitoolCli::try_parse_from(args).expect_err("help should short-circuit");
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
         err.to_string()
+    }
+
+    #[test]
+    fn cloud_help_preserves_the_upstream_service_name() {
+        let help = help_from_args(&["moedex", "--help"]);
+        assert!(help.contains("Browse tasks from Codex Cloud"), "{help}");
     }
 
     #[test]

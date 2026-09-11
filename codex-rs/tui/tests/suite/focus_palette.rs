@@ -198,7 +198,7 @@ impl PtyCodex {
         let stdout = slave.try_clone().context("clone pseudo-terminal stdout")?;
 
         let codex = codex_utils_cargo_bin::cargo_bin("codex-tui")
-            .or_else(|_| codex_utils_cargo_bin::cargo_bin("codex"))?;
+            .or_else(|_| codex_utils_cargo_bin::cargo_bin("moedex"))?;
         let child = Command::new(codex)
             .args(extra_args)
             .arg("--no-alt-screen")
@@ -233,7 +233,7 @@ impl PtyCodex {
             self.read_output(Duration::from_millis(/*millis*/ 50))?;
             self.answer_startup_queries()?;
 
-            if self.palette_answered && self.screen_contains("OpenAI Codex") {
+            if self.palette_answered && self.screen_contains("Moedex") {
                 return Ok(());
             }
 

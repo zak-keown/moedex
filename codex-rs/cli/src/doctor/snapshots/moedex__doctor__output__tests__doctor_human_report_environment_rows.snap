@@ -25,7 +25,7 @@ Environment
   ✓ disk         sufficient free disk space (42.0 GiB)
   ⚠ security     Microsoft Defender can interfere with Codex. Verify Codex exclusions.
       endpoint products        Microsoft Defender
-      exclusion targets        verified Moedex app and required helpers
+      exclusion targets        verified Codex app and required helpers
     ▸ Codex exclusions         not verified (expected Codex application and helper exclusions)
     → Microsoft Defender: Add a certificate or executable-path exclusion for Codex and its helpers. If Attack Surface Reduction blocks Codex, add a rule exclusion. If Controlled Folder Access blocks Codex, allow the app.
   ✓ runtime      running local build on darwin-arm64

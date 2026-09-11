@@ -1350,7 +1350,7 @@ Background Server
             .iter_mut()
             .find(|detail| detail.starts_with("exclusion targets: "))
             .expect("endpoint security check should include exclusion targets");
-        *targets = "exclusion targets: verified Moedex app and required helpers".into();
+        *targets = "exclusion targets: verified Codex app and required helpers".into();
         report.checks.push(security);
         report.checks.extend([
             DoctorCheck::new(
