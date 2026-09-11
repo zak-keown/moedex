@@ -99,11 +99,39 @@ fn shared_home_guard_rejects_a_live_stock_owner_and_accepts_stale_lock() {
         source: HomeSource::CodexHomeCompatibility,
     };
     assert_eq!(
-        super::acquire_home_write_guard(&home)
+        super::acquire_home_write_guard(&home, super::HomeAccess::Store)
             .expect_err("live stock owner")
             .kind(),
         std::io::ErrorKind::WouldBlock
     );
     drop(owner);
-    super::acquire_home_write_guard(&home).expect("stale lock is safe");
+    super::acquire_home_write_guard(&home, super::HomeAccess::Store).expect("stale lock is safe");
+}
+
+#[test]
+fn daemon_guard_probes_but_does_not_retain_legacy_startup_lock() {
+    let home = tempfile::tempdir().expect("home");
+    let path = home
+        .path()
+        .join("app-server-control/app-server-startup.lock");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("directory");
+    let owner = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .expect("owner");
+    owner.lock().expect("live owner");
+    assert_eq!(
+        super::acquire_selected_daemon_home_guard(home.path())
+            .expect_err("live incompatible owner")
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    owner.unlock().expect("stale owner");
+    let _guard = super::acquire_selected_daemon_home_guard(home.path()).expect("stale lock");
+    owner
+        .try_lock()
+        .expect("legacy child can acquire startup lock while parent guard lives");
 }

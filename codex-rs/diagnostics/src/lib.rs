@@ -23,10 +23,20 @@ pub fn home_diagnostic(home: ResolvedProductHome) -> HomeDiagnostic {
     }
 }
 
+#[derive(Clone, Copy)]
+enum HomeAccess {
+    Store,
+    Daemon,
+}
+
 /// Checks existing stock writer locks without reading their contents. Retain the
-/// returned handles through the write so an existing stock lock cannot race it.
+/// returned handles through the operation. Daemon launch only probes the startup
+/// lock so a legacy child can acquire it; this cannot fence a later startup race.
 /// Stock clients that do not take these locks cannot participate in this guard.
-fn acquire_home_write_guard(home: &ResolvedProductHome) -> std::io::Result<Vec<std::fs::File>> {
+fn acquire_home_write_guard(
+    home: &ResolvedProductHome,
+    access: HomeAccess,
+) -> std::io::Result<Vec<std::fs::File>> {
     if home.source == HomeSource::CodexHomeCompatibility {
         tracing::warn!(path = %home.path.display(), source = ?home.source, "shared product home");
     }
@@ -59,7 +69,11 @@ fn acquire_home_write_guard(home: &ResolvedProductHome) -> std::io::Result<Vec<s
                 ),
             ));
         }
-        guards.push(file);
+        // A legacy child acquires this startup lock itself before binding.
+        // Probe its current owner, but do not hold it while waiting for the child.
+        if matches!(access, HomeAccess::Store) || relative == "app-server-daemon/daemon.lock" {
+            guards.push(file);
+        }
     }
     Ok(guards)
 }
@@ -68,13 +82,28 @@ fn acquire_home_write_guard(home: &ResolvedProductHome) -> std::io::Result<Vec<s
 pub fn acquire_selected_home_write_guard(
     path: &std::path::Path,
 ) -> std::io::Result<Vec<std::fs::File>> {
+    acquire_selected_home_guard(path, HomeAccess::Store)
+}
+
+/// Checks stock ownership before a daemon operation, retaining the stock
+/// operation lock but releasing its startup lock for a compatible legacy child.
+pub fn acquire_selected_daemon_home_guard(
+    path: &std::path::Path,
+) -> std::io::Result<Vec<std::fs::File>> {
+    acquire_selected_home_guard(path, HomeAccess::Daemon)
+}
+
+fn acquire_selected_home_guard(
+    path: &std::path::Path,
+    access: HomeAccess,
+) -> std::io::Result<Vec<std::fs::File>> {
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let path = AbsolutePathBuf::try_from(path)?;
     let source = codex_utils_home_dir::find_product_home()
         .ok()
         .filter(|home| home.path == path)
         .map_or(HomeSource::MoedexHome, |home| home.source);
-    acquire_home_write_guard(&ResolvedProductHome { path, source })
+    acquire_home_write_guard(&ResolvedProductHome { path, source }, access)
 }
 
 static GAUGES: Mutex<Vec<&'static Gauge>> = Mutex::new(Vec::new());

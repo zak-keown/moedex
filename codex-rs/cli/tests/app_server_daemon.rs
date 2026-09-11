@@ -10,6 +10,7 @@ use std::time::Instant;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::ensure;
+use codex_app_server_daemon::daemon_state_dir;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -71,7 +72,7 @@ impl TestDaemon {
     }
 
     fn pid(&self, name: &str) -> Result<u32> {
-        let record = std::fs::read(self.home.path().join("app-server-daemon").join(name))
+        let record = std::fs::read(daemon_state_dir(self.home.path()).join(name))
             .with_context(|| format!("failed to read {name}"))?;
         Ok(serde_json::from_slice::<Value>(&record)?["pid"]
             .as_u64()
@@ -145,7 +146,7 @@ fn managed_starts_ensure_one_updater_and_recover_a_missing_one() -> Result<()> {
 #[test]
 fn managed_start_succeeds_when_updater_record_is_invalid() -> Result<()> {
     let daemon = TestDaemon::new()?;
-    let state_dir = daemon.home.path().join("app-server-daemon");
+    let state_dir = daemon_state_dir(daemon.home.path());
     std::fs::create_dir_all(&state_dir)?;
     std::fs::write(state_dir.join("app-server-updater.pid"), "not a PID record")?;
 
@@ -186,10 +187,8 @@ fn managed_start_keeps_updater_on_marker_mismatch_but_stops_it_for_pin() -> Resu
     assert_eq!(daemon.lifecycle("start")?["status"], "alreadyRunning");
     wait_for_exit(updater_pid)?;
     assert!(
-        !daemon
-            .home
-            .path()
-            .join("app-server-daemon/app-server-updater.pid")
+        !daemon_state_dir(daemon.home.path())
+            .join("app-server-updater.pid")
             .exists()
     );
     Ok(())
@@ -200,7 +199,7 @@ fn restart_applies_saved_updater_preference() -> Result<()> {
     let daemon = TestDaemon::new()?;
     assert_eq!(daemon.lifecycle("start")?["status"], "started");
     let updater_pid = daemon.pid("app-server-updater.pid")?;
-    let settings = daemon.home.path().join("app-server-daemon/settings.json");
+    let settings = daemon_state_dir(daemon.home.path()).join("settings.json");
     std::fs::write(
         &settings,
         serde_json::to_vec(&serde_json::json!({
@@ -256,10 +255,8 @@ fn unmanaged_app_server_does_not_launch_updater() -> Result<()> {
     assert_eq!(output["backend"], Value::Null);
     assert_eq!(daemon.lifecycle("update")?["status"], "unsupported");
     assert!(
-        !daemon
-            .home
-            .path()
-            .join("app-server-daemon/app-server-updater.pid")
+        !daemon_state_dir(daemon.home.path())
+            .join("app-server-updater.pid")
             .exists()
     );
     Ok(())

@@ -22,6 +22,7 @@ use backend::BackendPaths;
 use codex_app_server_protocol::RemoteControlConnectionStatus;
 use codex_app_server_protocol::RemoteControlPairingStartResponse;
 use codex_app_server_transport::app_server_control_socket_path;
+pub use codex_app_server_transport::daemon_state_dir;
 use codex_utils_home_dir::find_codex_home;
 use managed_install::managed_codex_bin;
 #[cfg(any(unix, windows))]
@@ -40,7 +41,6 @@ const PID_FILE_NAME: &str = "app-server.pid";
 const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
 const OPERATION_LOCK_FILE_NAME: &str = "daemon.lock";
 const SETTINGS_FILE_NAME: &str = "settings.json";
-const STATE_DIR_NAME: &str = "moedex-daemon";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LifecycleCommand {
@@ -309,7 +309,7 @@ impl Daemon {
         let socket_path = app_server_control_socket_path(codex_home.as_path())?
             .as_path()
             .to_path_buf();
-        let state_dir = codex_home.as_path().join(STATE_DIR_NAME);
+        let state_dir = daemon_state_dir(codex_home.as_path());
         Ok(Self {
             socket_path,
             pid_file: state_dir.join(PID_FILE_NAME),
@@ -951,7 +951,7 @@ impl Daemon {
             .parent()
             .and_then(Path::parent)
             .context("daemon settings path has no product home")?;
-        let home_guard = codex_diagnostics::acquire_selected_home_write_guard(home)?;
+        let home_guard = codex_diagnostics::acquire_selected_daemon_home_guard(home)?;
         if let Some(parent) = self.operation_lock_file.parent() {
             #[cfg(unix)]
             if let Some(home) = parent.parent() {
@@ -1146,7 +1146,7 @@ mod tests {
             .open(stock.join("daemon.lock"))
             .expect("owner");
         owner.lock().expect("live owner");
-        let state = home.path().join(super::STATE_DIR_NAME);
+        let state = super::daemon_state_dir(home.path());
         let daemon = Daemon {
             socket_path: state.join("server.sock"),
             pid_file: state.join("server.pid"),

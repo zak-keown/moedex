@@ -940,3 +940,35 @@ fn auth_writer_rejects_live_stock_owner_without_overwriting_credentials() -> any
     );
     Ok(())
 }
+
+#[test]
+fn encrypted_auth_load_with_missing_key_never_mutates_keyring_under_stock_lock()
+-> anyhow::Result<()> {
+    let home = tempdir()?;
+    let keyring = Arc::new(MockKeyringStore::default());
+    let storage = SecretsKeyringAuthStorage::new(home.path().into(), keyring.clone());
+    storage.save(&auth_with_prefix("existing"))?;
+    let ciphertext = std::fs::read(encrypted_auth_file(home.path()))?;
+    let account = compute_keyring_account(home.path());
+    keyring.delete(KEYRING_SERVICE, &account)?;
+    let stock = home.path().join("app-server-daemon");
+    std::fs::create_dir(&stock)?;
+    let owner = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(stock.join("daemon.lock"))?;
+    owner.lock()?;
+    let guarded = GuardedAuthStorage {
+        home: home.path().into(),
+        backend: Arc::new(storage),
+    };
+    assert!(guarded.load().is_err());
+    assert!(
+        keyring.saved_value(&account).is_none(),
+        "read must not persist a new key"
+    );
+    assert_eq!(std::fs::read(encrypted_auth_file(home.path()))?, ciphertext);
+    Ok(())
+}

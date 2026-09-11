@@ -1,8 +1,14 @@
 ---
 source: cli/src/doctor/background.rs
-assertion_line: 332
+assertion_line: 341
 expression: details
 ---
-update-loop pid file: CODEX_HOME/app-server-daemon/app-server-updater.pid (missing)
+daemon state dir: CODEX_HOME/moedex-daemon
+settings: CODEX_HOME/moedex-daemon/settings.json (file)
+pid file: CODEX_HOME/moedex-daemon/app-server.pid (file)
+update-loop pid file: CODEX_HOME/moedex-daemon/app-server-updater.pid (missing)
 automatic updates: disabled (configured)
 update interval: 90 minutes (configured)
+control socket: CODEX_HOME/moedex-app-server/moedex-app-server.sock
+status: not running
+mode: persistent
