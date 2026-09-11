@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 34
+  fixed: 35
   stale: 0
   skipped: 1
   deferred: 6
-  open: 219
+  open: 218
 ---
 
 # Codebase Review — moedex
@@ -1375,6 +1375,10 @@ Fix: either queue completed-but-uninserted cards (flush the previous one via
 `take_completed_token_activity_output` before installing the new pending request) or make
 the drop explicit/visible instead of silent.
 
+**Disposition:** fixed
+**Commit:** `5f0900cfc0`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-036: OSC 9 desktop notifications forward unsanitized text into a raw terminal escape sequence
 
 **File:** `codex-rs/tui/src/notifications/osc9.rs`
