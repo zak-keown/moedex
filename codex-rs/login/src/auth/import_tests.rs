@@ -120,64 +120,161 @@ fn importing_file_auth_writes_only_the_destination_and_redacts_outcome() -> anyh
 }
 
 #[test]
+fn file_conflict_skips_and_explicit_replace_requires_sign_in() -> anyhow::Result<()> {
+    let source_home = tempdir()?;
+    let destination_home = tempdir()?;
+    let source_auth = api_key_auth("source-secret");
+    let destination_auth = api_key_auth("destination-secret");
+    let source = storage(
+        source_home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Codex,
+    );
+    let destination = storage(
+        destination_home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Moedex,
+    );
+    source.write_for_test(&source_auth)?;
+    destination.write_for_test(&destination_auth)?;
+
+    assert_eq!(
+        import_auth_record(&source, &destination)?,
+        AuthImportOutcome::Conflict
+    );
+    assert_eq!(destination.read_for_test()?, Some(destination_auth.clone()));
+    assert_eq!(
+        replace_auth_record(&source, &destination)?,
+        AuthImportOutcome::SignInRequired
+    );
+    assert_eq!(destination.read_for_test()?, Some(destination_auth));
+    assert_eq!(source.read_for_test()?, Some(source_auth));
+    Ok(())
+}
+
+#[test]
 fn direct_keyring_import_uses_independent_services() -> anyhow::Result<()> {
-    let home = tempdir()?;
+    let root = tempdir()?;
+    let source_home = root.path().join("source");
+    let destination_home = root.path().join("destination");
+    fs::create_dir_all(&source_home)?;
+    fs::create_dir_all(&destination_home)?;
     let keyring = Arc::new(ServiceKeyring::default());
     let source = keyring_storage(
-        home.path(),
+        &source_home,
         AuthKeyringBackendKind::Direct,
         AuthStorageNamespace::Codex,
         keyring.clone(),
     );
     let destination = keyring_storage(
-        home.path(),
+        &destination_home,
         AuthKeyringBackendKind::Direct,
         AuthStorageNamespace::Moedex,
         keyring.clone(),
     );
     source.write_for_test(&api_key_auth("direct-secret"))?;
+    let destination_auth = api_key_auth("direct-destination");
+    destination.write_for_test(&destination_auth)?;
 
     assert_eq!(
         import_auth_record(&source, &destination)?,
-        AuthImportOutcome::Imported
+        AuthImportOutcome::Conflict
     );
-    let key = crate::auth::storage::compute_store_key(home.path())?;
-    assert!(keyring.load("Codex Auth", &key)?.is_some());
-    assert!(keyring.load("Moedex Auth", &key)?.is_some());
+    assert_eq!(destination.read_for_test()?, Some(destination_auth));
+    let source_key = crate::auth::storage::compute_store_key(&source_home)?;
+    let destination_key = crate::auth::storage::compute_store_key(&destination_home)?;
+    assert!(keyring.load("Codex Auth", &source_key)?.is_some());
+    assert!(keyring.load("Moedex Auth", &destination_key)?.is_some());
     destination.delete_for_test()?;
-    assert!(keyring.load("Codex Auth", &key)?.is_some());
-    assert!(keyring.load("Moedex Auth", &key)?.is_none());
+    assert!(keyring.load("Codex Auth", &source_key)?.is_some());
+    assert!(keyring.load("Moedex Auth", &destination_key)?.is_none());
     Ok(())
 }
 
 #[test]
 fn encrypted_import_uses_independent_files_and_logout_isolated() -> anyhow::Result<()> {
-    let home = tempdir()?;
+    let root = tempdir()?;
+    let source_home = root.path().join("source");
+    let destination_home = root.path().join("destination");
+    fs::create_dir_all(&source_home)?;
+    fs::create_dir_all(&destination_home)?;
     let keyring = Arc::new(ServiceKeyring::default());
     let source = keyring_storage(
-        home.path(),
+        &source_home,
         AuthKeyringBackendKind::Secrets,
         AuthStorageNamespace::Codex,
         keyring.clone(),
     );
     let destination = keyring_storage(
-        home.path(),
+        &destination_home,
         AuthKeyringBackendKind::Secrets,
         AuthStorageNamespace::Moedex,
         keyring,
     );
     let original = api_key_auth("encrypted-secret");
     source.write_for_test(&original)?;
+    let destination_auth = api_key_auth("encrypted-destination");
+    destination.write_for_test(&destination_auth)?;
 
     assert_eq!(
         import_auth_record(&source, &destination)?,
-        AuthImportOutcome::Imported
+        AuthImportOutcome::Conflict
     );
-    assert!(home.path().join("secrets/codex_auth.age").is_file());
-    assert!(home.path().join("secrets/moedex_auth.age").is_file());
+    assert_eq!(destination.read_for_test()?, Some(destination_auth));
+    assert!(source_home.join("secrets/codex_auth.age").is_file());
+    assert!(destination_home.join("secrets/moedex_auth.age").is_file());
     destination.delete_for_test()?;
     assert_eq!(source.read_for_test()?, Some(original));
     assert_eq!(destination.read_for_test()?, None);
+    Ok(())
+}
+
+#[test]
+fn import_rejects_equal_and_symlink_aliased_homes() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let source = storage(
+        home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Codex,
+    );
+    let destination = storage(
+        home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Moedex,
+    );
+    source.write_for_test(&api_key_auth("same-home-secret"))?;
+    assert_eq!(
+        import_auth_record(&source, &destination)
+            .expect_err("same home")
+            .kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+
+    #[cfg(unix)]
+    {
+        let root = tempdir()?;
+        let real = root.path().join("real");
+        let alias = root.path().join("alias");
+        fs::create_dir(&real)?;
+        std::os::unix::fs::symlink(&real, &alias)?;
+        let source = storage(
+            &real,
+            AuthCredentialsStoreMode::File,
+            AuthStorageNamespace::Codex,
+        );
+        let destination = storage(
+            &alias,
+            AuthCredentialsStoreMode::File,
+            AuthStorageNamespace::Moedex,
+        );
+        source.write_for_test(&api_key_auth("alias-secret"))?;
+        assert_eq!(
+            import_auth_record(&source, &destination)
+                .expect_err("aliased home")
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+    }
     Ok(())
 }
 
@@ -305,30 +402,20 @@ fn ephemeral_and_inaccessible_stores_return_sanitized_outcomes() -> anyhow::Resu
 
 #[cfg(unix)]
 #[test]
-fn file_import_tightens_existing_destination_permissions() -> anyhow::Result<()> {
+fn file_save_tightens_existing_destination_permissions() -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
-    let source_home = tempdir()?;
     let destination_home = tempdir()?;
-    FileAuthStorage::new(source_home.path().into()).save(&api_key_auth("secret"))?;
     let destination_file = destination_home.path().join("auth.json");
     fs::write(&destination_file, "{}")?;
     fs::set_permissions(&destination_file, fs::Permissions::from_mode(0o644))?;
-    let source = storage(
-        source_home.path(),
-        AuthCredentialsStoreMode::File,
-        AuthStorageNamespace::Codex,
-    );
     let destination = storage(
         destination_home.path(),
         AuthCredentialsStoreMode::File,
         AuthStorageNamespace::Moedex,
     );
 
-    assert_eq!(
-        import_auth_record(&source, &destination)?,
-        AuthImportOutcome::Imported
-    );
+    destination.write_for_test(&api_key_auth("secret"))?;
     assert_eq!(
         fs::metadata(destination_file)?.permissions().mode() & 0o777,
         0o600

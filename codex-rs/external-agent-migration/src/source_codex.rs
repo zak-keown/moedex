@@ -10,6 +10,7 @@ use codex_login::AuthImportOutcome;
 use codex_login::AuthStorage;
 use codex_login::AuthStorageNamespace;
 use codex_login::import_auth_record;
+use codex_login::replace_auth_record;
 use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path::write_atomically as replace_text_atomically;
@@ -355,7 +356,13 @@ pub async fn apply_codex_import(
 
     for item in plan.items {
         if item.preview.kind == ImportItemKind::Credentials {
-            apply_credential_import(&source, &destination, &item.preview, &mut report);
+            apply_credential_import(
+                &source,
+                &destination,
+                &item.preview,
+                selection.conflict_policy,
+                &mut report,
+            );
             continue;
         }
         let Some(payload) = item.payload else {
@@ -465,10 +472,23 @@ fn apply_credential_import(
     source_home: &Path,
     destination_home: &Path,
     preview: &ImportPreviewItem,
+    conflict_policy: ConflictPolicy,
     report: &mut ImportReport,
 ) {
-    let source_config = auth_storage_config(source_home);
-    let destination_config = auth_storage_config(destination_home);
+    let source_config = match auth_storage_config(source_home) {
+        Ok(config) => config,
+        Err(_) => {
+            record_auth_import_outcome(report, preview, AuthImportOutcome::SignInRequired);
+            return;
+        }
+    };
+    let destination_config = match auth_storage_config(destination_home) {
+        Ok(config) => config,
+        Err(_) => {
+            record_auth_import_outcome(report, preview, AuthImportOutcome::Failed);
+            return;
+        }
+    };
     let source = AuthStorage::new(
         source_home.to_path_buf(),
         source_config.mode,
@@ -481,7 +501,19 @@ fn apply_credential_import(
         destination_config.keyring_backend,
         AuthStorageNamespace::Moedex,
     );
-    let outcome = import_auth_record(&source, &destination).unwrap_or(AuthImportOutcome::Failed);
+    let outcome = match conflict_policy {
+        ConflictPolicy::Skip => import_auth_record(&source, &destination),
+        ConflictPolicy::ReplaceWithBackup => replace_auth_record(&source, &destination),
+    }
+    .unwrap_or(AuthImportOutcome::Failed);
+    record_auth_import_outcome(report, preview, outcome);
+}
+
+fn record_auth_import_outcome(
+    report: &mut ImportReport,
+    preview: &ImportPreviewItem,
+    outcome: AuthImportOutcome,
+) {
     let (disposition, reason) = match outcome {
         AuthImportOutcome::Imported => {
             report.imported = report.imported.saturating_add(1);
@@ -492,6 +524,13 @@ fn apply_credential_import(
             (
                 ImportDisposition::Skipped,
                 Some("no stored credentials found".to_string()),
+            )
+        }
+        AuthImportOutcome::Conflict => {
+            report.skipped = report.skipped.saturating_add(1);
+            (
+                ImportDisposition::SkippedConflict,
+                Some("destination credentials already exist".to_string()),
             )
         }
         AuthImportOutcome::SignInRequired => {

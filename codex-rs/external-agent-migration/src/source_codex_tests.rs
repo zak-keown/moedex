@@ -100,6 +100,35 @@ async fn explicitly_selected_credentials_import_without_entering_preview() {
             .expect("source auth")
             .contains(secret)
     );
+    fs::write(
+        destination.join("auth.json"),
+        r#"{"auth_mode":"apikey","OPENAI_API_KEY":"destination-secret"}"#,
+    )
+    .expect("destination auth");
+    let preview = preview_codex_import(
+        abs(&source),
+        abs(&destination),
+        CodexImportSelection {
+            settings: false,
+            sessions: false,
+            credentials: true,
+            conflict_policy: ConflictPolicy::Skip,
+        },
+    )
+    .await
+    .expect("conflict preview");
+    let report = apply_codex_import(&preview.id, preview.selection)
+        .await
+        .expect("conflict apply");
+    assert_eq!(
+        report.items[0].disposition,
+        ImportDisposition::SkippedConflict
+    );
+    assert!(
+        fs::read_to_string(destination.join("auth.json"))
+            .expect("destination auth")
+            .contains("destination-secret")
+    );
 }
 
 #[tokio::test]
@@ -134,6 +163,61 @@ async fn missing_or_invalid_credentials_report_sign_in_required() {
         ImportDisposition::SignInRequired
     );
     assert!(!destination.join("auth.json").exists());
+}
+
+#[tokio::test]
+async fn ambiguous_auth_storage_config_fails_closed() {
+    let root = TempDir::new().expect("tempdir");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(&source).expect("source");
+    fs::create_dir_all(&destination).expect("destination");
+    let secret = "stale-file-secret";
+    fs::write(
+        source.join("auth.json"),
+        format!(r#"{{"auth_mode":"apikey","OPENAI_API_KEY":"{secret}"}}"#),
+    )
+    .expect("source auth");
+    fs::write(
+        source.join("config.toml"),
+        "cli_auth_credentials_store = [invalid]",
+    )
+    .expect("invalid source config");
+    let selection = CodexImportSelection {
+        settings: false,
+        sessions: false,
+        credentials: true,
+        conflict_policy: ConflictPolicy::Skip,
+    };
+
+    let preview = preview_codex_import(abs(&source), abs(&destination), selection)
+        .await
+        .expect("preview");
+    let report = apply_codex_import(&preview.id, preview.selection.clone())
+        .await
+        .expect("apply");
+    assert_eq!(report.sign_in_required, 1);
+    assert!(!destination.join("auth.json").exists());
+
+    fs::remove_file(source.join("config.toml")).expect("remove invalid source config");
+    fs::write(
+        destination.join("config.toml"),
+        "[features]\nsecret_auth_storage = [false]",
+    )
+    .expect("invalid destination config");
+    let preview = preview_codex_import(abs(&source), abs(&destination), preview.selection)
+        .await
+        .expect("preview");
+    let report = apply_codex_import(&preview.id, preview.selection)
+        .await
+        .expect("apply");
+    assert_eq!(report.failed, 1);
+    assert!(!destination.join("auth.json").exists());
+    assert!(
+        fs::read_to_string(source.join("auth.json"))
+            .expect("source auth")
+            .contains(secret)
+    );
 }
 
 #[tokio::test]

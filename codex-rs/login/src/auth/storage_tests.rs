@@ -65,6 +65,32 @@ async fn file_storage_save_persists_auth_dot_json() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn file_storage_replace_failure_preserves_previous_auth_and_removes_plaintext_temp()
+-> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    let original = auth_with_prefix("original");
+    storage.save(&original)?;
+
+    let error = storage
+        .save_with_atomic_replace_for_test(&auth_with_prefix("replacement"), |_temp, _target| {
+            Err(std::io::Error::other("injected replace failure"))
+        })
+        .expect_err("replace must fail");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    assert_eq!(storage.load()?, Some(original));
+    assert_eq!(
+        std::fs::read_dir(home.path())?
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains("auth.json."))
+            .count(),
+        0
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn file_storage_round_trips_agent_identity_auth() -> anyhow::Result<()> {
     let codex_home = tempdir()?;

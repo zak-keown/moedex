@@ -16,6 +16,7 @@ use std::sync::Arc;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuthImportOutcome {
     Imported,
+    Conflict,
     SignInRequired,
     Skipped,
     Failed,
@@ -99,6 +100,27 @@ pub fn import_auth_record(
     source: &AuthStorage,
     destination: &AuthStorage,
 ) -> std::io::Result<AuthImportOutcome> {
+    import_auth_record_with_replacement(source, destination, /*replace*/ false)
+}
+
+/// Attempts explicit replacement of an existing destination credential.
+///
+/// Persistent backend-specific backup is not currently guaranteed, so a
+/// conflict is converted to a sign-in requirement without changing either
+/// credential record.
+pub fn replace_auth_record(
+    source: &AuthStorage,
+    destination: &AuthStorage,
+) -> std::io::Result<AuthImportOutcome> {
+    import_auth_record_with_replacement(source, destination, /*replace*/ true)
+}
+
+fn import_auth_record_with_replacement(
+    source: &AuthStorage,
+    destination: &AuthStorage,
+    replace: bool,
+) -> std::io::Result<AuthImportOutcome> {
+    ensure_distinct_homes(&source.home, &destination.home)?;
     if source.mode == AuthCredentialsStoreMode::Ephemeral {
         return Ok(AuthImportOutcome::SignInRequired);
     }
@@ -116,10 +138,45 @@ pub fn import_auth_record(
     let Ok(_guard) = codex_diagnostics::acquire_selected_home_write_guard(&destination.home) else {
         return Ok(AuthImportOutcome::Failed);
     };
+    match destination.backend.load_for_import() {
+        Ok(Some(_)) if replace => return Ok(AuthImportOutcome::SignInRequired),
+        Ok(Some(_)) => return Ok(AuthImportOutcome::Conflict),
+        Ok(None) => {}
+        Err(_) => return Ok(AuthImportOutcome::Failed),
+    }
     match destination.backend.save(&record) {
         Ok(()) => Ok(AuthImportOutcome::Imported),
         Err(_) => Ok(AuthImportOutcome::Failed),
     }
+}
+
+fn ensure_distinct_homes(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    if canonical_home(source)? == canonical_home(destination)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "credential source and destination resolve to the same home",
+        ));
+    }
+    Ok(())
+}
+
+fn canonical_home(path: &std::path::Path) -> std::io::Result<PathBuf> {
+    if path.exists() {
+        return std::fs::canonicalize(path);
+    }
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "auth home has no parent")
+    })?;
+    let name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "auth home has no final component",
+        )
+    })?;
+    Ok(std::fs::canonicalize(parent)?.join(name))
 }
 
 fn validate_importable_auth(auth: &AuthDotJson) -> bool {

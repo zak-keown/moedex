@@ -11,31 +11,48 @@ pub(crate) struct AuthStorageConfig {
     pub keyring_backend: AuthKeyringBackendKind,
 }
 
-pub(crate) fn auth_storage_config(home: &Path) -> AuthStorageConfig {
-    let Ok(raw) = fs::read_to_string(home.join("config.toml")) else {
-        return AuthStorageConfig::default();
+pub(crate) fn auth_storage_config(home: &Path) -> io::Result<AuthStorageConfig> {
+    let raw = match fs::read_to_string(home.join("config.toml")) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(AuthStorageConfig::default());
+        }
+        Err(error) => {
+            return Err(io::Error::new(
+                error.kind(),
+                "auth storage config is unreadable",
+            ));
+        }
     };
-    let Ok(value) = raw.parse::<toml::Value>() else {
-        return AuthStorageConfig::default();
+    let value = raw.parse::<toml::Value>().map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidData, "auth storage config is invalid")
+    })?;
+    let mode = match value.get("cli_auth_credentials_store") {
+        Some(value) => value.clone().try_into().map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidData, "auth storage mode is invalid")
+        })?,
+        None => AuthCredentialsStoreMode::default(),
     };
-    let mode = value
-        .get("cli_auth_credentials_store")
-        .cloned()
-        .and_then(|value| value.try_into().ok())
-        .unwrap_or_default();
-    let uses_secrets = value
+    let uses_secrets = match value
         .get("features")
         .and_then(|features| features.get("secret_auth_storage"))
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(false);
-    AuthStorageConfig {
+    {
+        Some(value) => value.as_bool().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "auth storage feature setting is invalid",
+            )
+        })?,
+        None => false,
+    };
+    Ok(AuthStorageConfig {
         mode,
         keyring_backend: if uses_secrets {
             AuthKeyringBackendKind::Secrets
         } else {
             AuthKeyringBackendKind::Direct
         },
-    }
+    })
 }
 
 #[derive(Clone, Copy)]

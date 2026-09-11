@@ -18,6 +18,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use tracing::warn;
 
 use super::BedrockAccessKeysAuth;
@@ -219,6 +221,113 @@ impl FileAuthStorage {
 
         Ok(auth_dot_json)
     }
+
+    fn save_with_atomic_replace(
+        &self,
+        auth: &AuthDotJson,
+        replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        let auth_file = get_auth_file(&self.codex_home);
+        let parent = auth_file.parent().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "auth path has no parent")
+        })?;
+        std::fs::create_dir_all(parent)?;
+        let sequence = AUTH_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let temp = parent.join(format!(
+            ".auth.json.{}.{}.tmp",
+            std::process::id(),
+            sequence
+        ));
+        let json_data = serde_json::to_vec_pretty(auth)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options.open(&temp)?;
+        let result = (|| {
+            file.write_all(&json_data)?;
+            file.sync_all()?;
+            drop(file);
+            replace_auth_file_with_rollback(&temp, &auth_file, parent, replace)
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temp);
+        }
+        result
+    }
+
+    #[cfg(test)]
+    pub(super) fn save_with_atomic_replace_for_test(
+        &self,
+        auth: &AuthDotJson,
+        replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        self.save_with_atomic_replace(auth, replace)
+    }
+}
+
+#[cfg(unix)]
+fn replace_auth_file_with_rollback(
+    temp: &Path,
+    target: &Path,
+    parent: &Path,
+    replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let previous = if target.exists() {
+        std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o600))?;
+        let sequence = AUTH_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let backup = parent.join(format!(
+            ".auth.json.{}.{}.backup",
+            std::process::id(),
+            sequence
+        ));
+        std::fs::hard_link(target, &backup)?;
+        Some(backup)
+    } else {
+        None
+    };
+
+    if let Err(error) = replace(temp, target) {
+        if let Some(previous) = previous {
+            let _ = std::fs::remove_file(previous);
+        }
+        return Err(error);
+    }
+    if let Err(error) = sync_parent_directory(parent) {
+        restore_previous_auth(target, previous.as_deref(), parent);
+        return Err(error);
+    }
+    if let Some(previous) = previous
+        && let Err(error) = std::fs::remove_file(&previous)
+    {
+        restore_previous_auth(target, Some(&previous), parent);
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn replace_auth_file_with_rollback(
+    temp: &Path,
+    target: &Path,
+    parent: &Path,
+    replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    replace(temp, target)?;
+    sync_parent_directory(parent)
+}
+
+#[cfg(unix)]
+fn restore_previous_auth(target: &Path, previous: Option<&Path>, parent: &Path) {
+    match previous {
+        Some(previous) => {
+            let _ = std::fs::rename(previous, target);
+        }
+        None => {
+            let _ = std::fs::remove_file(target);
+        }
+    }
+    let _ = sync_parent_directory(parent);
 }
 
 impl AuthStorageBackend for FileAuthStorage {
@@ -233,24 +342,7 @@ impl AuthStorageBackend for FileAuthStorage {
     }
 
     fn save(&self, auth_dot_json: &AuthDotJson) -> std::io::Result<()> {
-        let auth_file = get_auth_file(&self.codex_home);
-
-        if let Some(parent) = auth_file.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let json_data = serde_json::to_string_pretty(auth_dot_json)?;
-        let mut options = OpenOptions::new();
-        options.truncate(true).write(true).create(true);
-        #[cfg(unix)]
-        {
-            options.mode(0o600);
-        }
-        let mut file = options.open(auth_file)?;
-        #[cfg(unix)]
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        file.write_all(json_data.as_bytes())?;
-        file.flush()?;
-        Ok(())
+        self.save_with_atomic_replace(auth_dot_json, replace_auth_file)
     }
 
     fn delete(&self) -> std::io::Result<bool> {
@@ -258,11 +350,47 @@ impl AuthStorageBackend for FileAuthStorage {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+fn replace_auth_file(temp: &Path, target: &Path) -> std::io::Result<()> {
+    std::fs::rename(temp, target)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_auth_file(temp: &Path, target: &Path) -> std::io::Result<()> {
+    if !target.exists() {
+        return std::fs::rename(temp, target);
+    }
+    let sequence = AUTH_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let backup = target.with_extension(format!("auth-backup-{}-{sequence}", std::process::id()));
+    std::fs::rename(target, &backup)?;
+    match std::fs::rename(temp, target) {
+        Ok(()) => match std::fs::remove_file(&backup) {
+            Ok(()) => Ok(()),
+            Err(error) => Err(error),
+        },
+        Err(error) => {
+            let _ = std::fs::rename(backup, target);
+            Err(error)
+        }
+    }
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> std::io::Result<()> {
+    File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 static CODEX_AUTH_SECRET_NAME: Lazy<SecretName> =
     Lazy::new(|| match SecretName::new("CODEX_AUTH") {
         Ok(name) => name,
         Err(err) => unreachable!("CODEX_AUTH should be a valid secret name: {err}"),
     });
+static AUTH_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const CODEX_KEYRING_SERVICE: &str = "Codex Auth";
 #[cfg(test)]
 const KEYRING_SERVICE: &str = codex_product_identity::PRODUCT_IDENTITY.credential_service;
