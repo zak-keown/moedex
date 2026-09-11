@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+
+from pathlib import Path
+import unittest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+UNIX_WORKFLOW = REPO_ROOT / ".github/workflows/rust-release.yml"
+WINDOWS_WORKFLOW = REPO_ROOT / ".github/workflows/rust-release-windows.yml"
+PROVENANCE_SCRIPT = REPO_ROOT / ".github/scripts/export-release-provenance.sh"
+
+
+class ReleaseWorkflowTest(unittest.TestCase):
+    def test_default_build_uses_hosted_runners_and_assembles_packages(self) -> None:
+        unix = UNIX_WORKFLOW.read_text()
+        windows = WINDOWS_WORKFLOW.read_text()
+
+        self.assertNotIn("-runners\n", windows)
+        self.assertNotIn("-linux-x64-xl", unix)
+        self.assertNotIn("github.event.repository.name }}-linux", unix)
+        self.assertIn("package-unsigned-macos:", unix)
+        self.assertIn("package-unsigned-windows:", windows)
+
+    def test_release_assets_do_not_require_a_fork_zsh_release(self) -> None:
+        unix = UNIX_WORKFLOW.read_text()
+
+        self.assertNotIn("CODEX_ZSH_RELEASE_TAG", unix)
+        self.assertNotIn("Download packaged zsh manifest", unix)
+
+    def test_dmg_uses_moedex_name_through_every_stage(self) -> None:
+        unix = UNIX_WORKFLOW.read_text()
+
+        self.assertNotIn("codex-${{ matrix.target }}.dmg", unix)
+        self.assertNotIn("codex-${TARGET}.dmg", unix)
+
+    def test_release_only_updater_tests_run_in_ci(self) -> None:
+        unix = UNIX_WORKFLOW.read_text()
+
+        self.assertIn("release-updater-tests:", unix)
+        self.assertIn("cargo test -p codex-tui --release", unix)
+
+    def test_every_package_job_requires_real_provenance(self) -> None:
+        unix = UNIX_WORKFLOW.read_text()
+        windows = WINDOWS_WORKFLOW.read_text()
+
+        self.assertGreaterEqual(unix.count("export-release-provenance.sh"), 3)
+        self.assertGreaterEqual(windows.count("export-release-provenance.sh"), 3)
+
+    def test_provenance_export_resolves_fork_and_upstream_commits(self) -> None:
+        script = PROVENANCE_SCRIPT.read_text()
+
+        self.assertIn('fork_commit="$(git rev-parse HEAD)"', script)
+        self.assertIn("https://github.com/openai/codex.git main", script)
+        self.assertIn('upstream_commit="$(git merge-base', script)
+        self.assertIn("STABLE_GIT_COMMIT=$fork_commit", script)
+        self.assertIn("STABLE_UPSTREAM_GIT_COMMIT=$upstream_commit", script)
+        self.assertIn("MOEDEX_RELEASE_CHANNEL=github", script)
+        self.assertIn("MOEDEX_REQUIRE_PROVENANCE=1", script)
+
+
+if __name__ == "__main__":
+    unittest.main()

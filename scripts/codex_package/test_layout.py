@@ -3,9 +3,11 @@
 from pathlib import Path
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -18,6 +20,36 @@ from codex_package.targets import TARGET_SPECS
 
 
 class PackageLayoutTest(unittest.TestCase):
+    def test_release_manifest_rejects_unknown_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            package_dir = root / "package"
+            package_dir.mkdir()
+            inputs = PackageInputs(
+                entrypoint_bin=touch_executable(root / "moedex"),
+                code_mode_host_bin=touch_executable(root / "codex-code-mode-host"),
+                rg_bin=touch_executable(root / "rg"),
+                zsh_bin=None,
+                bwrap_bin=touch_executable(root / "bwrap"),
+                codex_command_runner_bin=None,
+                codex_windows_sandbox_setup_bin=None,
+            )
+            variant = PACKAGE_VARIANTS["codex"]
+            spec = TARGET_SPECS["x86_64-unknown-linux-musl"]
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "MOEDEX_REQUIRE_PROVENANCE": "1",
+                    "STABLE_GIT_COMMIT": "unknown",
+                    "STABLE_UPSTREAM_GIT_COMMIT": "unknown",
+                    "MOEDEX_RELEASE_CHANNEL": "github",
+                },
+                clear=False,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "package provenance"):
+                    build_package_dir(package_dir, "1.2.3", variant, spec, inputs)
+
     def test_manifest_records_provenance_and_every_payload_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

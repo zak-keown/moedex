@@ -84,6 +84,24 @@ def build_package_dir(
             is_windows=True,
         )
 
+    provenance = {
+        "product": "moedex",
+        "repository": "zak-keown/moedex",
+        "forkCommit": os.environ.get("STABLE_GIT_COMMIT", "unknown"),
+        "upstreamCommit": os.environ.get("STABLE_UPSTREAM_GIT_COMMIT", "unknown"),
+        "releaseChannel": os.environ.get("MOEDEX_RELEASE_CHANNEL", "github"),
+    }
+    if os.environ.get("MOEDEX_REQUIRE_PROVENANCE") == "1":
+        missing = [
+            key
+            for key in ("forkCommit", "upstreamCommit", "releaseChannel")
+            if provenance[key].strip().lower() in {"", "unknown"}
+        ]
+        if missing:
+            raise RuntimeError(
+                "Release package provenance is missing: " + ", ".join(missing)
+            )
+
     metadata = {
         "layoutVersion": LAYOUT_VERSION,
         "version": version,
@@ -92,13 +110,7 @@ def build_package_dir(
         "entrypoint": f"bin/{entrypoint_name}",
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
-        "provenance": {
-            "product": "moedex",
-            "repository": "zak-keown/moedex",
-            "forkCommit": os.environ.get("STABLE_GIT_COMMIT", "unknown"),
-            "upstreamCommit": os.environ.get("STABLE_UPSTREAM_GIT_COMMIT", "unknown"),
-            "releaseChannel": os.environ.get("MOEDEX_RELEASE_CHANNEL", "github"),
-        },
+        "provenance": provenance,
         "checksums": package_checksums(package_dir),
     }
     write_json(package_dir / "codex-package.json", metadata)
