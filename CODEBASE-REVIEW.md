@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 22
+  fixed: 23
   stale: 0
   skipped: 1
   deferred: 6
-  open: 231
+  open: 230
 ---
 
 # Codebase Review — moedex
@@ -750,6 +750,10 @@ This is exactly the threat class the codebase already treats as first-class and 
 
 Fix: escape (or otherwise neutralize `</`) in `plugin.name()` and `plugin.id()` before formatting, mirroring `GuardianToolDescriptions`.
 
+**Disposition:** fixed
+**Commit:** `bb4ddcd94e`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-019: Skill MCP-dependency install prompt never discloses the command or URL being installed
 **File:** `codex-rs/core/src/mcp_skill_dependencies.rs`
 **Anchor:** `format_missing_mcp_dependencies`
