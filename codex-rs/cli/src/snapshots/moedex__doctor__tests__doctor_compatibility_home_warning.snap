@@ -1,0 +1,21 @@
+---
+source: cli/src/doctor.rs
+expression: "human.replace(&canonical_codex.display().to_string(), \"$CODEX_HOME\")"
+---
+Moedex Doctor vtest
+
+Notes
+   [!!] state        CODEX_HOME compatibility mode shares runtime state with stock Codex
+-------------------------------------------------------------
+
+Environment
+  [!!] state        CODEX_HOME compatibility mode shares runtime state with stock Codex
+      effective home           $CODEX_HOME
+      home source              CODEX_HOME compatibility
+      shares stock Codex state yes
+
+-------------------------------------------------------------
+0 ok | 1 notes | 1 warn | 0 fail degraded
+
+--summary compact output           --all expand truncated lists
+--json redacted report

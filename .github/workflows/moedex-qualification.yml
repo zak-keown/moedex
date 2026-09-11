@@ -85,7 +85,7 @@ jobs:
       - name: Public CLI and TUI identity
         run: >-
           python3 scripts/moedex_behavior_manifest.py run-gates
-          --gate cli --gate tui --gate model-identity
+          --gate cli --gate tui --gate brand-inventory --gate model-identity
 
   package-and-installers:
     runs-on: ubuntu-24.04

@@ -7,10 +7,24 @@ import unittest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UNIX_WORKFLOW = REPO_ROOT / ".github/workflows/rust-release.yml"
 WINDOWS_WORKFLOW = REPO_ROOT / ".github/workflows/rust-release-windows.yml"
+QUALIFICATION_WORKFLOW = REPO_ROOT / ".github/workflows/moedex-qualification.yml"
 PROVENANCE_SCRIPT = REPO_ROOT / ".github/scripts/export-release-provenance.sh"
 
 
 class ReleaseWorkflowTest(unittest.TestCase):
+    def test_behavior_qualification_runs_bounded_public_and_runtime_gates(self) -> None:
+        qualification = QUALIFICATION_WORKFLOW.read_text()
+
+        self.assertIn(
+            "--gate identity --gate home --gate build-info --gate diagnostics",
+            qualification,
+        )
+        self.assertIn("--gate app-server-transport --gate exec-server", qualification)
+        self.assertIn(
+            "--gate cli --gate tui --gate brand-inventory --gate model-identity",
+            qualification,
+        )
+
     def test_default_build_uses_hosted_runners_and_assembles_packages(self) -> None:
         unix = UNIX_WORKFLOW.read_text()
         windows = WINDOWS_WORKFLOW.read_text()

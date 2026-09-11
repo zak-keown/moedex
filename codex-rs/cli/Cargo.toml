@@ -41,6 +41,7 @@ codex-cloud-tasks = { path = "../cloud-tasks" }
 codex-utils-cli = { workspace = true }
 codex-config = { workspace = true }
 codex-core = { workspace = true }
+codex-diagnostics = { workspace = true }
 codex-core-plugins = { workspace = true }
 codex-history = { workspace = true }
 codex-home = { workspace = true }
@@ -74,6 +75,7 @@ codex-terminal-detection = { workspace = true }
 codex-thread-store = { workspace = true }
 codex-tui = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
+codex-utils-home-dir = { workspace = true }
 codex-utils-path = { workspace = true }
 crossterm = { workspace = true, features = ["event-stream"] }
 futures = { workspace = true }

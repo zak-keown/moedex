@@ -133,7 +133,10 @@ def write_package(
         ]:
             path = voice_root / relative
             libraries.append(
-                {"path": relative, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                {
+                    "path": relative,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
             )
         runtime = {
             "schemaVersion": 1,
@@ -144,9 +147,7 @@ def write_package(
             "sourceManifestSha256": hashlib.sha256(
                 (behavior.REPO_ROOT / "third_party/voice/sources.json").read_bytes()
             ).hexdigest(),
-            "plugins": sorted(
-                f"plugins/libgst{name}.dylib" for name in VOICE_PLUGINS
-            ),
+            "plugins": sorted(f"plugins/libgst{name}.dylib" for name in VOICE_PLUGINS),
             "libraries": libraries,
         }
         runtime_path = voice_root / "runtime.json"
@@ -228,7 +229,9 @@ def test_repository_manifest_is_complete_and_strict() -> None:
     assert all("exclusions" in entry for entry in manifest["requirements"])
 
 
-def test_repository_policy_scans_all_github_automation_with_exact_v8_allowance() -> None:
+def test_repository_policy_scans_all_github_automation_with_exact_v8_allowance() -> (
+    None
+):
     policy = repository_manifest()["sourceInventory"]["policyScan"]
     assert ".github" in policy["roots"]
     assert any(
@@ -593,9 +596,9 @@ def test_primary_macos_package_validates_runtime_declared_libraries(
     voice_manifest = json.loads(voice_manifest_path.read_text())
     del voice_manifest["sha256"][missing]
     voice_manifest_path.write_text(json.dumps(voice_manifest))
-    package_manifest["checksums"]["codex-resources/voice/manifest.json"] = hashlib.sha256(
-        voice_manifest_path.read_bytes()
-    ).hexdigest()
+    package_manifest["checksums"]["codex-resources/voice/manifest.json"] = (
+        hashlib.sha256(voice_manifest_path.read_bytes()).hexdigest()
+    )
     package_manifest_path.write_text(json.dumps(package_manifest))
 
     errors, _ = behavior.verify_artifacts(manifest, artifact_root)
@@ -876,3 +879,56 @@ def test_windows_release_evidence_uses_one_combined_symbols_archive(
         manifest,
         sorted(behavior.RELEASE_EVIDENCE_GATES),
     )
+
+
+def test_focused_rust_gates_are_bounded_and_reference_known_tests() -> None:
+    manifest = repository_manifest()
+    expected = {
+        "identity": (
+            "codex-rs/build-info/src/build_info_tests.rs",
+            "version_leads_with_distribution_and_retains_upstream_provenance",
+        ),
+        "diagnostics": (
+            "codex-rs/cli/src/doctor.rs",
+            "compatibility_home_is_explicit_in_human_and_json_reports",
+        ),
+        "login": (
+            "codex-rs/login/src/auth/storage_tests.rs",
+            "direct_auth_uses_moedex_service",
+        ),
+        "exec-server": (
+            "codex-rs/exec-server/tests/environment_config.rs",
+            "remote_executor_resolves_its_own_moedex_home",
+        ),
+        "tui": (
+            "codex-rs/tui/src/chatwidget/tests.rs",
+            "terminal_title_preview_uses_moedex_identity",
+        ),
+    }
+    root = Path(__file__).resolve().parents[1]
+    for gate_name, (source_path, required_filter) in expected.items():
+        argv = manifest["gates"][gate_name]["argv"]
+        assert required_filter in " ".join(argv)
+        if gate_name == "login":
+            assert (
+                "importing_file_auth_writes_only_the_destination_and_redacts_outcome"
+                in " ".join(argv)
+            )
+        assert required_filter.split("::")[-1] in (root / source_path).read_text()
+    assert manifest["gates"]["tui"]["argv"] != [
+        "just",
+        "test",
+        "-p",
+        "codex-tui",
+        "--lib",
+    ]
+    assert manifest["gates"]["exec-server"]["argv"] != [
+        "just",
+        "test",
+        "-p",
+        "codex-exec-server",
+    ]
+    assert manifest["gates"]["brand-inventory"]["argv"] == [
+        "python3",
+        "scripts/codex_package/test_public_brand_inventory.py",
+    ]

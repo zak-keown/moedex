@@ -17,7 +17,8 @@
         "just",
         "test",
         "-p",
-        "codex-product-identity"
+        "codex-build-info",
+        "version_leads_with_distribution_and_retains_upstream_provenance"
       ]
     },
     "home": {
@@ -45,7 +46,8 @@
         "test",
         "-p",
         "codex-login",
-        "auth::storage_tests"
+        "-E",
+        "test(direct_auth_uses_moedex_service) | test(encrypted_auth_uses_moedex_service) | test(moedex_auto_fallback_in_a_shared_home_preserves_stock_auth) | test(moedex_file_auth_in_a_shared_compatibility_home_never_touches_stock_auth) | test(importing_file_auth_writes_only_the_destination_and_redacts_outcome)"
       ]
     },
     "secrets": {
@@ -90,7 +92,9 @@
         "just",
         "test",
         "-p",
-        "codex-diagnostics"
+        "codex-cli",
+        "-E",
+        "test(runtime_provenance_exposes_stamped_distribution_metadata) | test(effective_home_reports_default_and_competing_overrides) | test(compatibility_home_is_explicit_in_human_and_json_reports)"
       ]
     },
     "exec-server": {
@@ -99,7 +103,9 @@
         "just",
         "test",
         "-p",
-        "codex-exec-server"
+        "codex-exec-server",
+        "-E",
+        "test(remote_executor_resolves_its_own_moedex_home) | test(environment_provider_from_codex_home_falls_back_when_file_is_missing) | test(environment_provider_from_codex_home_uses_present_environments_file) | test(helper_protocol_uses_path_uris)"
       ]
     },
     "rollout": {
@@ -137,7 +143,8 @@
         "test",
         "-p",
         "codex-tui",
-        "--lib"
+        "-E",
+        "test(terminal_title_preview_uses_moedex_identity) | test(welcome_copy_wraps_at_useful_widths) | test(startup_draft_renders_full_empty_and_multiline_composer_frames) | test(every_enabled_update_action_targets_moedex)"
       ]
     },
     "model-identity": {
@@ -209,6 +216,13 @@
         "--artifact-dir",
         "behavior-artifacts"
       ]
+    },
+    "brand-inventory": {
+      "cwd": ".",
+      "argv": [
+        "python3",
+        "scripts/codex_package/test_public_brand_inventory.py"
+      ]
     }
   },
   "requirements": [
@@ -241,7 +255,8 @@
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
       "tests": [
         "cli",
-        "tui"
+        "tui",
+        "brand-inventory"
       ],
       "artifacts": [],
       "exclusions": [
@@ -378,7 +393,8 @@
       "upstreamBase": "8e2afc09126c0cea4c282725fe68af43adad73d7",
       "tests": [
         "identity",
-        "build-info"
+        "build-info",
+        "diagnostics"
       ],
       "artifacts": [],
       "exclusions": [

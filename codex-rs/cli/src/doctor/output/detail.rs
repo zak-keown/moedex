@@ -179,18 +179,27 @@ fn parsed_details(check: &DoctorCheck) -> Vec<ParsedDetail> {
 
 fn runtime_details(parsed: &[ParsedDetail]) -> Vec<HumanDetail> {
     let mut out = Vec::new();
-    push_row_if_present(&mut out, parsed, "version", "version");
+    push_row_if_present(
+        &mut out,
+        parsed,
+        "distribution version",
+        "distribution version",
+    );
     push_row_if_present(&mut out, parsed, "install method", "install method");
-    push_row_if_present(&mut out, parsed, "commit", "commit");
+    push_row_if_present(&mut out, parsed, "fork commit", "fork commit");
+    push_row_if_present(&mut out, parsed, "upstream base", "upstream base");
+    push_row_if_present(&mut out, parsed, "release channel", "release channel");
     push_row_if_present(&mut out, parsed, "current executable", "executable");
     push_remaining(
         &mut out,
         parsed,
         &[
-            "version",
+            "distribution version",
             "platform",
             "install method",
-            "commit",
+            "fork commit",
+            "upstream base",
+            "release channel",
             "current executable",
         ],
         &[],
@@ -425,7 +434,14 @@ fn config_details(parsed: &[ParsedDetail], options: HumanOutputOptions) -> Vec<H
 
 fn state_details(parsed: &[ParsedDetail]) -> Vec<HumanDetail> {
     let mut out = Vec::new();
-    push_row_if_present(&mut out, parsed, "CODEX_HOME", "CODEX_HOME");
+    push_row_if_present(&mut out, parsed, "effective home", "effective home");
+    push_row_if_present(&mut out, parsed, "home source", "home source");
+    push_row_if_present(
+        &mut out,
+        parsed,
+        "shares stock Codex state",
+        "shares stock Codex state",
+    );
     push_row_if_present(&mut out, parsed, "log dir", "log dir");
     push_row_if_present(&mut out, parsed, "sqlite home", "sqlite home");
     push_database_row(&mut out, parsed, "state DB");
@@ -450,7 +466,9 @@ fn state_details(parsed: &[ParsedDetail]) -> Vec<HumanDetail> {
         &mut out,
         parsed,
         &[
-            "CODEX_HOME",
+            "effective home",
+            "home source",
+            "shares stock Codex state",
             "log dir",
             "sqlite home",
             "state DB",
@@ -612,8 +630,12 @@ fn humanize_detail(detail: HumanDetail, options: HumanOutputOptions) -> HumanDet
             value,
             expected,
         } => HumanDetail::Row {
+            value: if label == "effective home" {
+                value
+            } else {
+                humanize_value(&value, options)
+            },
             label,
-            value: humanize_value(&value, options),
             expected,
         },
         HumanDetail::Continuation(value) => {
