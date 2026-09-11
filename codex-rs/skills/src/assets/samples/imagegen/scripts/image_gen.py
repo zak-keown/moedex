@@ -668,20 +668,30 @@ async def _run_generate_batch(args: argparse.Namespace) -> int:
         payload = _merge_non_null(payload, {k: job.get(k) for k in base_payload.keys()})
         payload = {k: v for k, v in payload.items() if v is not None}
 
-        n = int(payload.get("n", 1))
-        _validate_generate_payload(payload)
-        effective_output_format = _normalize_output_format(payload.get("output_format"))
-        _validate_transparency(payload.get("background"), effective_output_format)
-        payload["output_format"] = effective_output_format
-        outputs = _job_output_paths(
-            out_dir=out_dir,
-            output_format=effective_output_format,
-            idx=i,
-            prompt=prompt,
-            n=n,
-            explicit_out=job.get("out"),
-        )
+        # Per-job validation must run inside the try below: the validators call
+        # `_die`, which raises `SystemExit` (a `BaseException`, not `Exception`).
+        # Left outside the try, a single malformed job's `SystemExit` propagates
+        # out of `asyncio.gather` and aborts the entire batch — bypassing
+        # `--fail-fast` and killing other jobs already in flight — instead of
+        # degrading to a reported "job failed". Catch `SystemExit` alongside
+        # `Exception` so a bad job is contained (and still re-raised under
+        # `--fail-fast`, which is the flag that is supposed to abort the batch).
         try:
+            n = int(payload.get("n", 1))
+            _validate_generate_payload(payload)
+            effective_output_format = _normalize_output_format(
+                payload.get("output_format")
+            )
+            _validate_transparency(payload.get("background"), effective_output_format)
+            payload["output_format"] = effective_output_format
+            outputs = _job_output_paths(
+                out_dir=out_dir,
+                output_format=effective_output_format,
+                idx=i,
+                prompt=prompt,
+                n=n,
+                explicit_out=job.get("out"),
+            )
             async with sem:
                 print(f"{job_label} starting", file=sys.stderr)
                 started = time.time()
@@ -703,7 +713,7 @@ async def _run_generate_batch(args: argparse.Namespace) -> int:
                 output_format=effective_output_format,
             )
             return i, None
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:
             any_failed = True
             print(f"{job_label} failed: {exc}", file=sys.stderr)
             if args.fail_fast:
