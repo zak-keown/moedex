@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 10
+  fixed: 11
   stale: 0
   skipped: 1
   deferred: 0
-  open: 249
+  open: 248
 ---
 
 # Codebase Review — moedex
@@ -602,6 +602,10 @@ source_type = "git"
 
 The fix is to mirror the pattern already used correctly by the sibling module `plugin_edit.rs`'s `ensure_table_for_write`, which converts an existing inline table into a proper table via `value.as_inline_table().map_or_else(new_implicit_table, table_from_inline)` instead of discarding it, or to reuse `remove_marketplace`'s existing inline-table-aware handling for the equivalent write path.
 
+**Disposition:** fixed
+**Commit:** `ee8e6dffb2`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-015: Untrusted-context marker key is unescaped, letting the caller forge the fence around "untrusted" content
 **File:** `codex-rs/context-fragments/src/additional_context.rs`
 **Anchor:** `additional_context_body`
