@@ -95,7 +95,7 @@ pub(crate) fn new_server_version_warning(
     let mut lines = vec![Line::from(notice.message.yellow())];
     if notice.offer_update {
         lines.push(Line::from("To update the service, run:".yellow()));
-        lines.push(Line::from("  codex app-server daemon update".cyan()));
+        lines.push(Line::from("  moedex app-server daemon update".cyan()));
         lines.push(Line::from(
             "Updating may interrupt active or queued work.".yellow(),
         ));

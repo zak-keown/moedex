@@ -147,6 +147,12 @@ home_is_shared_with_codex() {
 }
 
 uninstall_moedex() {
+  if home_is_shared_with_codex; then
+    warn "Leaving all package and command links unchanged because the effective home may be shared with Codex."
+    step "Moedex data and downloaded releases were preserved in $CODEX_HOME_DIR."
+    return
+  fi
+
   remove_managed_link \
     "$BIN_PATH" \
     "$CURRENT_LINK/bin/moedex" \
@@ -155,22 +161,18 @@ uninstall_moedex() {
     "$CODE_MODE_HOST_BIN_PATH" \
     "$CURRENT_LINK/bin/codex-code-mode-host"
 
-  if ! home_is_shared_with_codex; then
-    current_target="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
-    canonical_current_target="$(canonical_path "$current_target")"
-    canonical_releases_dir="$(canonical_path "$RELEASES_DIR")"
-    recorded_target="$(cat "$CURRENT_OWNER_MARKER" 2>/dev/null || true)"
-    case "$canonical_current_target" in
-      "$canonical_releases_dir"/*)
-        if [ "$recorded_target" = "$canonical_current_target" ]; then
-          rm -f "$CURRENT_LINK"
-          rm -f "$CURRENT_OWNER_MARKER"
-        fi
-        ;;
-    esac
-  else
-    warn "Leaving package links in CODEX_HOME unchanged because that home may be shared with Codex."
-  fi
+  current_target="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
+  canonical_current_target="$(canonical_path "$current_target")"
+  canonical_releases_dir="$(canonical_path "$RELEASES_DIR")"
+  recorded_target="$(cat "$CURRENT_OWNER_MARKER" 2>/dev/null || true)"
+  case "$canonical_current_target" in
+    "$canonical_releases_dir"/*)
+      if [ "$recorded_target" = "$canonical_current_target" ]; then
+        rm -f "$CURRENT_LINK"
+        rm -f "$CURRENT_OWNER_MARKER"
+      fi
+      ;;
+  esac
 
   step "Removed installer-managed Moedex command links."
   step "Moedex data and downloaded releases were preserved in $CODEX_HOME_DIR."

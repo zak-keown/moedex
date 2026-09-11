@@ -83,6 +83,9 @@ class InstallShTest(unittest.TestCase):
             install_bin = root / "install-bin"
             install_bin.mkdir()
             (install_bin / "moedex").symlink_to(current / "bin" / "moedex")
+            (install_bin / "codex-code-mode-host").symlink_to(
+                current / "bin" / "codex-code-mode-host"
+            )
 
             result, requests = run_installer_in(
                 root,
@@ -94,8 +97,8 @@ class InstallShTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(requests, [])
-            self.assertFalse((install_bin / "moedex").exists())
-            self.assertFalse((install_bin / "moedex").is_symlink())
+            self.assertTrue((install_bin / "moedex").is_symlink())
+            self.assertTrue((install_bin / "codex-code-mode-host").is_symlink())
             self.assertTrue(current.is_symlink())
             self.assertEqual(current.resolve(), release.resolve())
 
@@ -116,6 +119,9 @@ class InstallShTest(unittest.TestCase):
             install_bin = root / "install-bin"
             install_bin.mkdir()
             (install_bin / "moedex").symlink_to(current / "bin" / "moedex")
+            (install_bin / "codex-code-mode-host").symlink_to(
+                current / "bin" / "codex-code-mode-host"
+            )
 
             result, requests = run_installer_in(
                 root,
@@ -128,7 +134,8 @@ class InstallShTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(requests, [])
-            self.assertFalse((install_bin / "moedex").is_symlink())
+            self.assertTrue((install_bin / "moedex").is_symlink())
+            self.assertTrue((install_bin / "codex-code-mode-host").is_symlink())
             self.assertTrue(current.is_symlink())
             self.assertEqual(current.resolve(), release.resolve())
             self.assertEqual(stock_data.read_text(), "stock credentials\n")

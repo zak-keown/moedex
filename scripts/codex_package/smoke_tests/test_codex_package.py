@@ -120,8 +120,17 @@ def test_packaged_interactive_launch_dispatches_tui_headlessly(
 ) -> None:
     """The package reaches TUI terminal admission without opening a browser."""
     environment = dict(package.environment)
-    environment["TERM"] = "dumb"
-    for variable in ("TERM_PROGRAM", "TMUX", "TMUX_PANE", "ZELLIJ_SESSION_NAME"):
+    environment["TERM"] = "xterm-256color"
+    for variable in (
+        "TERM_PROGRAM",
+        "TERM_SESSION_ID",
+        "LC_TERMINAL",
+        "WT_SESSION",
+        "TMUX",
+        "TMUX_PANE",
+        "ZELLIJ",
+        "ZELLIJ_SESSION_NAME",
+    ):
         environment.pop(variable, None)
 
     result = subprocess.run(
@@ -137,7 +146,7 @@ def test_packaged_interactive_launch_dispatches_tui_headlessly(
 
     assert result.returncode != 0
     output = f"{result.stdout}\n{result.stderr}".lower()
-    assert "stdin is not a terminal" in output, output
+    assert output.strip() == "stdin is not a terminal", output
 
 
 def test_packaged_exec_and_resume_complete_against_local_provider(

@@ -22,7 +22,7 @@ class InstallPs1Test(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_uninstall_preserves_moedex_data_and_stock_codex(self) -> None:
+    def test_public_uninstall_preserves_moedex_data_and_stock_codex(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             moedex_home = root / "moedex-home"
@@ -37,17 +37,17 @@ class InstallPs1Test(unittest.TestCase):
             stock_binary.parent.mkdir()
             stock_binary.write_text("stock binary\n", encoding="utf-8")
 
-            result = invoke_uninstall(moedex_home, visible_bin, root, stock_home)
+            result = invoke_public_uninstall(moedex_home, visible_bin, root, stock_home)
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse(visible_bin.is_symlink())
-            self.assertFalse(current.is_symlink())
+            self.assertFalse(link_exists(visible_bin))
+            self.assertFalse(link_exists(current))
             self.assertTrue(release.is_dir())
             self.assertEqual(moedex_data.read_text(), "retained conversation\n")
             self.assertEqual(stock_data.read_text(), "stock credentials\n")
             self.assertTrue(stock_binary.is_file())
 
-    def test_moedex_home_alias_of_codex_home_preserves_stock_current(self) -> None:
+    def test_public_uninstall_preserves_every_link_for_shared_codex_home(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             stock_home = root / "stock-home"
@@ -55,13 +55,33 @@ class InstallPs1Test(unittest.TestCase):
             stock_data = stock_home / "auth.json"
             stock_data.write_text("stock credentials\n", encoding="utf-8")
 
-            result = invoke_uninstall(stock_home, visible_bin, root, stock_home)
+            result = invoke_public_uninstall(stock_home, visible_bin, root, stock_home)
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse(visible_bin.is_symlink())
-            self.assertTrue(current.is_symlink())
+            self.assertIn("shared with Codex", result.stdout + result.stderr)
+            self.assertTrue(link_exists(visible_bin))
+            self.assertTrue(link_exists(current))
             self.assertEqual(current.resolve(), release.resolve())
+            self.assertTrue((visible_bin / "moedex.exe").is_file())
+            self.assertTrue((visible_bin / "codex-code-mode-host.exe").is_file())
             self.assertEqual(stock_data.read_text(), "stock credentials\n")
+
+    def test_public_uninstall_preserves_canonical_stock_home_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            stock_home = root / "profile" / ".codex"
+            visible_bin, current, release = create_installed_layout(stock_home, root)
+            alias = root / "stock-home-alias"
+            create_directory_link(alias, stock_home)
+
+            result = invoke_public_uninstall(alias, visible_bin, root / "profile", "")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("shared with Codex", result.stdout + result.stderr)
+            self.assertTrue(link_exists(visible_bin))
+            self.assertTrue(link_exists(current))
+            self.assertEqual(current.resolve(), release.resolve())
+            self.assertTrue((visible_bin / "codex-code-mode-host.exe").is_file())
 
 
 def create_installed_layout(home: Path, root: Path) -> tuple[Path, Path, Path]:
@@ -69,46 +89,75 @@ def create_installed_layout(home: Path, root: Path) -> tuple[Path, Path, Path]:
     release_bin = release / "bin"
     release_bin.mkdir(parents=True)
     (release_bin / "moedex.exe").write_text("moedex binary\n", encoding="utf-8")
+    (release_bin / "codex-code-mode-host.exe").write_text(
+        "code mode host\n", encoding="utf-8"
+    )
     standalone = home / "packages" / "standalone"
     current = standalone / "current"
-    current.symlink_to(release, target_is_directory=True)
+    create_directory_link(current, release)
     (standalone / "moedex-current-target").write_text(
         f"{release.absolute()}\n", encoding="utf-8"
     )
     visible_bin = root / "visible-bin"
-    visible_bin.symlink_to(current / "bin", target_is_directory=True)
+    create_directory_link(visible_bin, current / "bin")
     return visible_bin, current, release
 
 
-def invoke_uninstall(
+def create_directory_link(link: Path, target: Path) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        result = subprocess.run(
+            ["cmd", "/d", "/c", "mklink", "/J", str(link), str(target.absolute())],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr or result.stdout)
+    else:
+        link.symlink_to(target.absolute(), target_is_directory=True)
+
+
+def link_exists(path: Path) -> bool:
+    return path.is_symlink() or path.exists()
+
+
+def invoke_public_uninstall(
     moedex_home: Path,
     visible_bin: Path,
     user_profile: Path,
-    codex_home: Path,
+    codex_home: Path | str,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.update(
         {
-            "MOEDEX_TEST_HOME": str(moedex_home),
-            "MOEDEX_TEST_VISIBLE_BIN": str(visible_bin),
-            "MOEDEX_TEST_USERPROFILE": str(user_profile),
-            "MOEDEX_TEST_CODEX_HOME": str(codex_home),
+            "MOEDEX_HOME": str(moedex_home),
+            "MOEDEX_INSTALL_DIR": str(visible_bin),
+            "USERPROFILE": str(user_profile),
+            "LOCALAPPDATA": str(user_profile / "AppData" / "Local"),
+            "CODEX_HOME": str(codex_home),
         }
     )
-    return run_powershell(
-        ". $env:MOEDEX_TEST_INSTALLER; "
-        "Uninstall-Moedex -MoedexHome $env:MOEDEX_TEST_HOME "
-        "-VisibleBinDir $env:MOEDEX_TEST_VISIBLE_BIN "
-        "-UserProfile $env:MOEDEX_TEST_USERPROFILE "
-        "-CodexHome $env:MOEDEX_TEST_CODEX_HOME",
+    return subprocess.run(
+        [
+            str(POWERSHELL),
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            str(INSTALL_SCRIPT.resolve()),
+            "-Uninstall",
+        ],
+        capture_output=True,
+        check=False,
         env=env,
+        text=True,
+        timeout=20,
     )
 
 
-def run_powershell(
-    command: str, *, env: dict[str, str] | None = None
-) -> subprocess.CompletedProcess[str]:
-    environment = os.environ.copy() if env is None else env
+def run_powershell(command: str) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
     environment["MOEDEX_TEST_INSTALLER"] = str(INSTALL_SCRIPT.resolve())
     return subprocess.run(
         [str(POWERSHELL), "-NoLogo", "-NoProfile", "-Command", command],

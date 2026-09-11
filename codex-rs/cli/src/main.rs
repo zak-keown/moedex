@@ -4186,7 +4186,7 @@ mod tests {
             vec![
                 "Token usage: total=2 input=0 output=2".to_string(),
                 "To continue this session, run:".to_string(),
-                "  codex resume 123e4567-e89b-12d3-a456-426614174000".to_string(),
+                "  moedex resume 123e4567-e89b-12d3-a456-426614174000".to_string(),
             ]
         );
     }
@@ -4201,7 +4201,7 @@ mod tests {
                 insta::assert_snapshot!(lines.join("\n"), @"
                 Token usage: total=2 input=0 output=2
                 To continue this session, run:
-                  codex resume 123e4567-e89b-12d3-a456-426614174000
+                  moedex resume 123e4567-e89b-12d3-a456-426614174000
                 ");
             }
         }
@@ -4219,7 +4219,7 @@ mod tests {
             vec![
                 "Token usage: total=2 input=0 output=2",
                 "To continue this session, run:",
-                "  \u{1b}[36mcodex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
+                "  \u{1b}[36mmoedex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
             ]
         );
     }
@@ -4234,8 +4234,8 @@ mod tests {
         insta::assert_snapshot!(lines.join("\n"), @"
         Token usage: total=2 input=0 output=2
         To continue this session, run:
-          codex resume 123e4567-e89b-12d3-a456-426614174000
-        Or run codex resume and select my-thread.
+          moedex resume 123e4567-e89b-12d3-a456-426614174000
+        Or run moedex resume and select my-thread.
         ");
     }
 
@@ -4251,8 +4251,8 @@ mod tests {
             vec![
                 "Token usage: total=2 input=0 output=2",
                 "To continue this session, run:",
-                "  \u{1b}[36mcodex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
-                "Or run \u{1b}[36mcodex resume\u{1b}[39m and select \u{1b}[36mmy-thread\u{1b}[39m.",
+                "  \u{1b}[36mmoedex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
+                "Or run \u{1b}[36mmoedex resume\u{1b}[39m and select \u{1b}[36mmy-thread\u{1b}[39m.",
             ]
         );
     }

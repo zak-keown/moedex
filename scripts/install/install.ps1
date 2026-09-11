@@ -822,7 +822,24 @@ function Test-VisibleCodexCommand {
 function Get-NormalizedInstallerPath {
     param([string]$Path)
 
-    return [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            $resolved = $item.ResolveLinkTarget($true).FullName
+        } else {
+            $resolved = $item.FullName
+        }
+    } catch {
+        $parent = Split-Path -Parent $Path
+        $name = Split-Path -Leaf $Path
+        try {
+            $resolvedParent = (Resolve-Path -LiteralPath $parent -ErrorAction Stop).ProviderPath
+            $resolved = Join-Path $resolvedParent $name
+        } catch {
+            $resolved = [System.IO.Path]::GetFullPath($Path)
+        }
+    }
+    return $resolved.TrimEnd("\", "/")
 }
 
 function Test-InstallerPathsEqual {
@@ -894,48 +911,36 @@ function Uninstall-Moedex {
     $releasesDir = Join-Path $standaloneRoot "releases"
     $currentDir = Join-Path $standaloneRoot "current"
     $ownerMarker = Join-Path $standaloneRoot "moedex-current-target"
+    if (Test-MoedexHomeIsSharedWithCodex -MoedexHome $MoedexHome -UserProfile $UserProfile -CodexHome $CodexHome) {
+        Write-WarningStep "Leaving all package and command links unchanged because the effective home may be shared with Codex."
+        Write-Step "Moedex data and downloaded releases were preserved in $MoedexHome."
+        return
+    }
+
     Remove-InstallerOwnedLink -Path $VisibleBinDir -ExpectedTargets @(
         (Join-Path $currentDir "bin"),
         $currentDir
     )
 
-    if (Test-MoedexHomeIsSharedWithCodex -MoedexHome $MoedexHome -UserProfile $UserProfile -CodexHome $CodexHome) {
-        Write-WarningStep "Leaving package links in CODEX_HOME unchanged because that home may be shared with Codex."
+    $currentTarget = Get-InstallerLinkTarget -Path $currentDir
+    $recordedTarget = if (Test-Path -LiteralPath $ownerMarker) {
+        [System.IO.File]::ReadAllText($ownerMarker).Trim()
     } else {
-        $currentTarget = Get-InstallerLinkTarget -Path $currentDir
-        $recordedTarget = if (Test-Path -LiteralPath $ownerMarker) {
-            [System.IO.File]::ReadAllText($ownerMarker).Trim()
-        } else {
-            $null
-        }
-        if (-not [string]::IsNullOrWhiteSpace($currentTarget) -and
-            -not [string]::IsNullOrWhiteSpace($recordedTarget) -and
-            (Test-InstallerPathsEqual -Left $currentTarget -Right $recordedTarget) -and
-            (Get-NormalizedInstallerPath -Path $currentTarget).StartsWith(
-                (Get-NormalizedInstallerPath -Path $releasesDir) + [System.IO.Path]::DirectorySeparatorChar,
-                [System.StringComparison]::OrdinalIgnoreCase
-            )) {
-            Remove-Item -LiteralPath $currentDir -Force
-            Remove-Item -LiteralPath $ownerMarker -Force
-        }
+        $null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($currentTarget) -and
+        -not [string]::IsNullOrWhiteSpace($recordedTarget) -and
+        (Test-InstallerPathsEqual -Left $currentTarget -Right $recordedTarget) -and
+        (Get-NormalizedInstallerPath -Path $currentTarget).StartsWith(
+            (Get-NormalizedInstallerPath -Path $releasesDir) + [System.IO.Path]::DirectorySeparatorChar,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )) {
+        Remove-Item -LiteralPath $currentDir -Force
+        Remove-Item -LiteralPath $ownerMarker -Force
     }
 
     Write-Step "Removed installer-managed Moedex command links."
     Write-Step "Moedex data and downloaded releases were preserved in $MoedexHome."
-}
-
-if ($MyInvocation.InvocationName -eq ".") {
-    return
-}
-
-if ($env:OS -ne "Windows_NT") {
-    Write-Error "install.ps1 supports Windows only. Use install.sh on macOS or Linux."
-    exit 1
-}
-
-if (-not [Environment]::Is64BitOperatingSystem) {
-    Write-Error "Moedex requires a 64-bit version of Windows."
-    exit 1
 }
 
 $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
@@ -985,6 +990,16 @@ if (-not [string]::IsNullOrWhiteSpace($env:MOEDEX_INSTALL_DIR)) {
 if ($Uninstall) {
     Uninstall-Moedex -MoedexHome $codexHome -VisibleBinDir $visibleBinDir -UserProfile $env:USERPROFILE -CodexHome $env:CODEX_HOME
     return
+}
+
+if ($env:OS -ne "Windows_NT") {
+    Write-Error "install.ps1 supports Windows only. Use install.sh on macOS or Linux."
+    exit 1
+}
+
+if (-not [Environment]::Is64BitOperatingSystem) {
+    Write-Error "Moedex requires a 64-bit version of Windows."
+    exit 1
 }
 
 $currentVersion = Get-CurrentInstalledVersion -StandaloneCurrentDir $currentDir
