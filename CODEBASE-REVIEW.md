@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 27
+  fixed: 28
   stale: 0
   skipped: 1
   deferred: 6
-  open: 226
+  open: 225
 ---
 
 # Codebase Review — moedex
@@ -1249,6 +1249,10 @@ asserts `list_thread_spawn_descendants`/`find_thread_spawn_descendant_by_path` s
 way `list_threads_by_relation_filters_spawn_graph_with_keyset_pagination` already does for the
 other code path.
 
+**Disposition:** fixed
+**Commit:** `2438d74e5a`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-034: App-server request resolution is consumed before the RPC that delivers it succeeds, silently dropping the user's decision
 
 **File:** `codex-rs/tui/src/app/thread_routing.rs`
