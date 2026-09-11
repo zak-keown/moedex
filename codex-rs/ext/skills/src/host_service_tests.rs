@@ -1038,11 +1038,14 @@ async fn skills_for_cwd_does_not_bleed_session_config_across_sessions() {
     let cwd_abs = cwd.path().abs();
 
     // Session A disables the skill and warms the cache for this cwd.
-    let parent_input =
-        HostSkillsLoadInput::new(cwd_abs.clone(), Vec::new(), parent_stack);
+    let parent_input = HostSkillsLoadInput::new(cwd_abs.clone(), Vec::new(), parent_stack);
     let parent_snapshot = skills_service
         .for_request()
-        .snapshot_for_cwd(&parent_input, /*force_reload*/ false, Some(Arc::clone(&LOCAL_FS)))
+        .snapshot_for_cwd(
+            &parent_input,
+            /*force_reload*/ false,
+            Some(Arc::clone(&LOCAL_FS)),
+        )
         .await;
     let parent_outcome = parent_snapshot.outcome();
     let parent_skill = parent_outcome
@@ -1058,7 +1061,11 @@ async fn skills_for_cwd_does_not_bleed_session_config_across_sessions() {
     let child_input = HostSkillsLoadInput::new(cwd_abs, Vec::new(), child_stack);
     let child_snapshot = skills_service
         .for_request()
-        .snapshot_for_cwd(&child_input, /*force_reload*/ false, Some(Arc::clone(&LOCAL_FS)))
+        .snapshot_for_cwd(
+            &child_input,
+            /*force_reload*/ false,
+            Some(Arc::clone(&LOCAL_FS)),
+        )
         .await;
     let child_outcome = child_snapshot.outcome();
     let child_skill = child_outcome

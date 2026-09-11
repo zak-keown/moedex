@@ -157,14 +157,20 @@ mod tests {
     fn redacted_env_for_log_omits_values() {
         let mut env = HashMap::new();
         env.insert("OPENAI_API_KEY".to_string(), "sk-super-secret".to_string());
-        env.insert("AWS_SECRET_ACCESS_KEY".to_string(), "aws-top-secret".to_string());
+        env.insert(
+            "AWS_SECRET_ACCESS_KEY".to_string(),
+            "aws-top-secret".to_string(),
+        );
         env.insert("PATH".to_string(), "/usr/local/bin".to_string());
 
         let rendered = redacted_env_for_log(&env);
 
         // Variable names are safe to log; values (which include real
         // credentials that reach the child) must never appear.
-        assert!(rendered.contains("OPENAI_API_KEY"), "names must be logged: {rendered}");
+        assert!(
+            rendered.contains("OPENAI_API_KEY"),
+            "names must be logged: {rendered}"
+        );
         assert!(rendered.contains("AWS_SECRET_ACCESS_KEY"));
         assert!(rendered.contains("PATH"));
         assert!(

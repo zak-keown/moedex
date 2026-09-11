@@ -1564,7 +1564,11 @@ mod tests {
         // unrelated connection tries to forge both an error and an approval for
         // the same id. Neither may resolve the original caller's callback.
         outgoing
-            .notify_client_error(ConnectionId(2), request_id.clone(), internal_error("forged"))
+            .notify_client_error(
+                ConnectionId(2),
+                request_id.clone(),
+                internal_error("forged"),
+            )
             .await;
         assert_eq!(waiter.try_recv(), Err(oneshot::error::TryRecvError::Empty));
 

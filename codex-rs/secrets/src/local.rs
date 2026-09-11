@@ -191,11 +191,12 @@ impl LocalSecretsBackend {
             .write(true)
             .truncate(false)
             .open(&lock_path)
-            .with_context(|| {
-                format!("failed to open secrets lock file {}", lock_path.display())
-            })?;
+            .with_context(|| format!("failed to open secrets lock file {}", lock_path.display()))?;
         lock_file.lock().with_context(|| {
-            format!("failed to acquire secrets write lock {}", lock_path.display())
+            format!(
+                "failed to acquire secrets write lock {}",
+                lock_path.display()
+            )
         })?;
         Ok(lock_file)
     }

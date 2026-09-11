@@ -197,9 +197,7 @@ mod tests {
     #[tokio::test]
     async fn refuses_to_bind_non_loopback_listener() {
         let result = TraceWebSocket::start("ws://0.0.0.0:0").await;
-        let err = result
-            .err()
-            .expect("non-loopback bind must be refused");
+        let err = result.err().expect("non-loopback bind must be refused");
         assert!(
             err.to_string().contains("non-loopback"),
             "unexpected error: {err}"

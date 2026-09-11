@@ -1054,7 +1054,8 @@ PATCH"#,
         ];
 
         let result =
-            maybe_parse_apply_patch_verified(&argv, &cwd, LOCAL_FS.as_ref(), /*sandbox*/ None).await;
+            maybe_parse_apply_patch_verified(&argv, &cwd, LOCAL_FS.as_ref(), /*sandbox*/ None)
+                .await;
 
         match result {
             MaybeApplyPatchVerified::CorrectnessError(err) => {

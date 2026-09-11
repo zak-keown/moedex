@@ -3596,10 +3596,7 @@ mod tests {
         // The reachable descendants are returned in depth order; the cycle back
         // to the root neither adds infinite rows nor lists the root as its own
         // descendant.
-        assert_eq!(
-            descendants,
-            vec![child_thread_id, grandchild_thread_id]
-        );
+        assert_eq!(descendants, vec![child_thread_id, grandchild_thread_id]);
     }
 
     #[tokio::test]
@@ -3611,10 +3608,10 @@ mod tests {
         )
         .await
         .expect("state db should initialize");
-        let a = ThreadId::from_string("00000000-0000-0000-0000-0000000009b0")
-            .expect("valid thread id");
-        let b = ThreadId::from_string("00000000-0000-0000-0000-0000000009b1")
-            .expect("valid thread id");
+        let a =
+            ThreadId::from_string("00000000-0000-0000-0000-0000000009b0").expect("valid thread id");
+        let b =
+            ThreadId::from_string("00000000-0000-0000-0000-0000000009b1").expect("valid thread id");
 
         // Real thread rows exist (so the outer JOIN is not short-circuited to
         // empty), but none carries the requested agent path.

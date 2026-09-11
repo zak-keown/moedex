@@ -133,9 +133,14 @@ fn upsert_marketplace(
 /// The field set of a single marketplace entry, as `toml_edit::Value`s so it can
 /// populate either a proper table or an inline table without duplicating the
 /// field logic.
-fn marketplace_entry_fields(update: &MarketplaceConfigUpdate<'_>) -> Vec<(&'static str, TomlValue)> {
+fn marketplace_entry_fields(
+    update: &MarketplaceConfigUpdate<'_>,
+) -> Vec<(&'static str, TomlValue)> {
     let mut fields = vec![
-        ("source_type", TomlValue::from(update.source_type.to_string())),
+        (
+            "source_type",
+            TomlValue::from(update.source_type.to_string()),
+        ),
         ("source", TomlValue::from(update.source.to_string())),
     ];
     if let Some(ref_name) = update.ref_name {
@@ -335,9 +340,7 @@ marketplaces = {
         let config: toml::Value =
             toml::from_str(&fs::read_to_string(codex_home.path().join(CONFIG_TOML_FILE)).unwrap())
                 .unwrap();
-        let marketplaces = config
-            .get("marketplaces")
-            .expect("marketplaces table");
+        let marketplaces = config.get("marketplaces").expect("marketplaces table");
         assert!(
             marketplaces.get("debug").is_some(),
             "existing inline-table marketplace `debug` must be preserved"

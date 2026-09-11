@@ -149,6 +149,9 @@ mod tests {
             1,
             "only the one structural </path> should remain: {body}"
         );
-        assert!(body.contains("<\\/skill>"), "forged tags should be escaped: {body}");
+        assert!(
+            body.contains("<\\/skill>"),
+            "forged tags should be escaped: {body}"
+        );
     }
 }

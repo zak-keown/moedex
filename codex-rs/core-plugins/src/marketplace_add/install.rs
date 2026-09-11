@@ -50,7 +50,10 @@ pub(super) fn clone_git_source(
 /// exactly like the SHA over the raw object, so without this a remote that
 /// contains such a ref could silently install a different, attacker-chosen tree.
 /// Mirrors `loader::clone_git_plugin_source`'s post-checkout verification.
-fn verify_pinned_sha(ref_name: Option<&str>, destination: &Path) -> Result<(), MarketplaceAddError> {
+fn verify_pinned_sha(
+    ref_name: Option<&str>,
+    destination: &Path,
+) -> Result<(), MarketplaceAddError> {
     let Some(ref_name) = ref_name else {
         return Ok(());
     };
@@ -239,9 +242,9 @@ mod tests {
 
         assert!(
             matches!(err, MarketplaceAddError::Internal(ref msg)
-                if msg == &format!(
-                    "checked out Git SHA {malicious_sha} does not match requested SHA {benign_sha}"
-                )),
+            if msg == &format!(
+                "checked out Git SHA {malicious_sha} does not match requested SHA {benign_sha}"
+            )),
             "unexpected error: {err:?}"
         );
     }

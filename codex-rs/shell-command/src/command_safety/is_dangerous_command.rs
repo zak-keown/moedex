@@ -303,8 +303,24 @@ mod tests {
             vec_str(&["env", "--chdir", "/tmp", "rm", "-rf", "/tmp/example"]),
             vec_str(&["env", "--chdir=/tmp", "rm", "-rf", "/tmp/example"]),
             vec_str(&["env", "-u", "FOO", "rm", "-rf", "/tmp/example"]),
-            vec_str(&["env", "-u", "FOO", "-C", "/tmp", "rm", "-rf", "/tmp/example"]),
-            vec_str(&["env", "-S", "rm -rf /tmp/example", "rm", "-rf", "/tmp/example"]),
+            vec_str(&[
+                "env",
+                "-u",
+                "FOO",
+                "-C",
+                "/tmp",
+                "rm",
+                "-rf",
+                "/tmp/example",
+            ]),
+            vec_str(&[
+                "env",
+                "-S",
+                "rm -rf /tmp/example",
+                "rm",
+                "-rf",
+                "/tmp/example",
+            ]),
         ] {
             assert_eq!(
                 dangerous_command_match(&command),
