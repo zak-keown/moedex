@@ -58,6 +58,7 @@ pub(crate) use approved_command_prefix_saved::ApprovedCommandPrefixSaved;
 pub(crate) use apps_instructions::AppsInstructions;
 pub(crate) use available_plugins_instructions::AvailablePluginsInstructions;
 pub(crate) use base_instructions::BaseInstructionsFragment;
+pub(crate) use base_instructions::MOEDEX_IDENTITY_INSTRUCTION;
 pub(crate) use codex_context_fragments::AdditionalContextDeveloperFragment;
 pub(crate) use codex_context_fragments::AdditionalContextUserFragment;
 pub use codex_context_fragments::AnsweredQuestion;

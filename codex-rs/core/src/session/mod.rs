@@ -1401,9 +1401,11 @@ impl Session {
     }
 
     /// Render the request copy without changing instructions persisted or inherited by forks.
+    /// Model-provided instructions receive the Moedex application identity here so every catalog
+    /// template follows the distribution branding while explicit user overrides remain literal.
     pub(crate) async fn get_prompt_base_instructions(&self) -> BaseInstructions {
         let config = self.get_config().await;
-        let instructions = self.get_base_instructions().await;
+        let mut instructions = self.get_base_instructions().await;
         if !config.update_plan_enabled
             && config.model_catalog.is_none()
             && matches!(
@@ -1411,13 +1413,23 @@ impl Session {
                 Some(BaseInstructionsProvenance::Model { .. })
             )
         {
-            BaseInstructions {
-                text: crate::context::without_update_plan_instructions(&instructions.text),
-                ..instructions
-            }
-        } else {
-            instructions
+            instructions.text =
+                crate::context::without_update_plan_instructions(&instructions.text);
         }
+        if matches!(
+            instructions.provenance,
+            Some(BaseInstructionsProvenance::Model { .. })
+        ) && !instructions
+            .text
+            .contains(crate::context::MOEDEX_IDENTITY_INSTRUCTION)
+        {
+            instructions.text = format!(
+                "{}\n\n{}",
+                crate::context::MOEDEX_IDENTITY_INSTRUCTION,
+                instructions.text
+            );
+        }
+        instructions
     }
 
     // Merges connector IDs into the session-level explicit connector selection.
