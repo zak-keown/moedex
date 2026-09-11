@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 33
+  fixed: 34
   stale: 0
   skipped: 1
   deferred: 6
-  open: 220
+  open: 219
 ---
 
 # Codebase Review — moedex
@@ -1419,6 +1419,10 @@ Fix: strip (or percent/caret-escape) control characters — at minimum `\x1b` an
 `message` before formatting the OSC 9 command, mirroring `sanitized_destination`'s
 `!ch.is_control()` filter, both in the plain and tmux-DCS-passthrough branches.
 
+**Disposition:** fixed
+**Commit:** `e9017d0138`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-037: BlockingLruCache panics instead of no-op inside a current-thread Tokio runtime
 
 **File:** `codex-rs/utils/cache/src/lib.rs`
