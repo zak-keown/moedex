@@ -15,9 +15,9 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 19
+  fixed: 20
   stale: 0
-  skipped: 2
+  skipped: 1
   deferred: 3
   open: 236
 ---
@@ -1049,10 +1049,10 @@ This is inconsistent with the rest of the codebase's established convention for 
 
 Fix: run the same authority/query redaction used in `redact_url_token`/`redact_sensitive_url_parts` over each proxy value before it is placed in `FeedbackDiagnostic::details`.
 
-**Disposition:** skipped
-**Commit:** —
+**Disposition:** fixed
+**Commit:** `ae03407286`
 **Resolved:** 2026-09-11
-**Note:** Premise confirmed: collect_from_pairs copies proxy env values (incl. userinfo/query) verbatim, and attachment_text is uploaded to Sentry. BUT the redaction fix conflicts with explicit, deliberately-tested intent: three tests assert verbatim reporting — collect_from_pairs_reports_raw_values_and_attachment (its fixture is literally https://user:password@secure-proxy.example.com:443?secret=1, asserted reproduced byte-for-byte), collect_from_pairs_reports_values_verbatim, and collect_from_pairs_preserves_whitespace_and_empty_values. Any userinfo/query redaction turns all three red. Per the skill's rule against silently rewriting maintainer intent-encoding tests, escalating rather than forcing. Recommended (needs a maintainer decision): redact URL userinfo + query (mirroring login::redact_sensitive_url_parts / doctor::redact_url_token, the codebase's own convention for this data class), keeping scheme/host/port, and update the three tests to assert the redacted form. Nothing touched.
+**Note:** Initially skipped as a design conflict (three tests deliberately asserted verbatim proxy reporting), then implemented after the user chose redaction. Added `redact_proxy_value` (strips URL userinfo + query/fragment, keeps scheme://host:port/path; non-URL values pass through), applied it in `collect_from_pairs`, and updated the three verbatim-intent tests to assert the redacted form plus a direct `redact_proxy_value` unit test. Mirrors the codebase's URL redaction convention (login::redact_sensitive_url_parts / doctor::redact_url_token). Red/green: `collect_from_pairs_redacts_credentials_and_reports_attachment` fails against the old verbatim code and passes after; full feedback_diagnostics suite green.
 ### CR-029: OTEL trace WebSocket listener has no auth and no loopback enforcement, unlike its sibling
 **File:** `codex-rs/otel-trace-websocket/src/lib.rs`
 **Anchor:** `TraceWebSocket::start`
