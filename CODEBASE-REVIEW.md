@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 13
+  fixed: 14
   stale: 0
   skipped: 1
   deferred: 0
-  open: 246
+  open: 245
 ---
 
 # Codebase Review — moedex
@@ -1430,6 +1430,10 @@ Fix: change the literal to `r"\\.\NUL"` (or drop the `r` prefix and use
 `"\\\\.\\NUL"`), matching the correct convention already used in this file's
 own sibling test file.
 
+**Disposition:** fixed
+**Commit:** `cf3ebed805`
+**Resolved:** 2026-09-11
+**Note:** Raw-string literal corrected to r"\\.\NUL" (canonical 7-byte \.\NUL). Defect and fix verified cross-platform with rustc (byte comparison against the canonical path). The CreateFileW/ACL path is #[cfg(target_os = "windows")] and cannot be compiled/run on this macOS host, so the syscall behavior was not exercised.
 ### CR-039: USERPROFILE_ROOT_EXCLUSIONS omits common top-level credential files, exposing them to sandboxed reads
 **File:** `codex-rs/windows-sandbox-rs/src/setup.rs`
 **Anchor:** `USERPROFILE_ROOT_EXCLUSIONS`, `profile_read_roots`
