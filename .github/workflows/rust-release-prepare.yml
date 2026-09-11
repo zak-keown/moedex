@@ -14,8 +14,8 @@ permissions:
 
 jobs:
   prepare:
-    # Prevent scheduled runs on forks (no secrets, wastes Actions minutes)
-    if: github.repository == 'openai/codex'
+    # Mutating preparation is explicitly enabled only for the Moedex repository.
+    if: github.repository == 'zak-keown/moedex' && vars.MOEDEX_ENABLE_PUBLISH == 'true'
     environment:
       name: rust-release-prepare
       deployment: false

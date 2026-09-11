@@ -1,0 +1,12 @@
+---
+source: tui/src/history_cell/tests.rs
+assertion_line: 1320
+expression: rendered
+---
+╭─────────────────────────────────────────────────────────────────────────╮
+│ ✨ Update available! 0.0.0 -> 9.9.9                                     │
+│ Run open https://github.com/zak-keown/moedex/releases/latest to update. │
+│                                                                         │
+│ See full release notes:                                                 │
+│ https://github.com/zak-keown/moedex/releases/latest                     │
+╰─────────────────────────────────────────────────────────────────────────╯

@@ -87,7 +87,7 @@ jobs:
             target: aarch64-apple-darwin
             bundle: primary
             artifact_name: aarch64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy"
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy"
             build_dmg: "true"
           - runner: macos-15-xlarge
             target: aarch64-apple-darwin
@@ -99,7 +99,7 @@ jobs:
             target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy"
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy"
             build_dmg: "true"
           - runner: macos-15-xlarge
             target: x86_64-apple-darwin
@@ -112,7 +112,7 @@ jobs:
             target: x86_64-unknown-linux-musl
             bundle: primary
             artifact_name: x86_64-unknown-linux-musl
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy bwrap"
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy bwrap"
             build_dmg: "false"
           - runner: ${{ github.event.repository.name }}-linux-x64-xl
             target: x86_64-unknown-linux-musl
@@ -124,7 +124,7 @@ jobs:
             target: aarch64-unknown-linux-musl
             bundle: primary
             artifact_name: aarch64-unknown-linux-musl
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy bwrap"
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy bwrap"
             build_dmg: "false"
           - runner: ${{ github.event.repository.name }}-linux-arm64
             target: aarch64-unknown-linux-musl
@@ -539,7 +539,7 @@ jobs:
 
   sign-macos-binaries:
     needs: [build, build-macos-voice]
-    if: ${{ always() && needs.build.result == 'success' && needs.build-macos-voice.result == 'success' }}
+    if: ${{ vars.MOEDEX_ENABLE_PUBLISH == 'true' && github.repository == 'zak-keown/moedex' && always() && needs.build.result == 'success' && needs.build-macos-voice.result == 'success' }}
     name: Sign macOS binaries - ${{ matrix.target }} - ${{ matrix.bundle }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -557,7 +557,7 @@ jobs:
           - target: aarch64-apple-darwin
             bundle: primary
             artifact_name: aarch64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy"
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy"
           - target: aarch64-apple-darwin
             bundle: app-server
             artifact_name: aarch64-apple-darwin-app-server
@@ -565,7 +565,7 @@ jobs:
           - target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy"
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy"
           - target: x86_64-apple-darwin
             bundle: app-server
             artifact_name: x86_64-apple-darwin-app-server
@@ -804,7 +804,7 @@ jobs:
           - target: aarch64-apple-darwin
             bundle: primary
             artifact_name: aarch64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy"
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy"
             build_dmg: "true"
           - target: aarch64-apple-darwin
             bundle: app-server
@@ -814,7 +814,7 @@ jobs:
           - target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy"
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy"
             build_dmg: "true"
           - target: x86_64-apple-darwin
             bundle: app-server
@@ -936,8 +936,8 @@ jobs:
           target="${{ matrix.target }}"
           release_dir="target/${target}/release"
           dmg_root="${RUNNER_TEMP}/codex-dmg-root-${target}"
-          volname="Codex (${target})"
-          dmg_path="${release_dir}/codex-${target}.dmg"
+          volname="Moedex (${target})"
+          dmg_path="${release_dir}/moedex-${target}.dmg"
 
           rm -rf "$dmg_root"
           mkdir -p "$dmg_root"
@@ -956,8 +956,8 @@ jobs:
             # package layout so InstallContext finds its adjacent voice runtime.
             package="${RUNNER_TEMP}/codex-package-voice-${target}"
             ditto "$package" "$dmg_root"
-            rm "${dmg_root}/codex"
-            ln -s bin/codex "${dmg_root}/codex"
+            rm "${dmg_root}/moedex"
+            ln -s bin/moedex "${dmg_root}/moedex"
           fi
 
           rm -f "$dmg_path"
@@ -1178,7 +1178,7 @@ jobs:
           - target: aarch64-apple-darwin
             bundle: primary
             artifact_name: aarch64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy"
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy"
             verify_dmg: "true"
           - target: aarch64-apple-darwin
             bundle: app-server
@@ -1188,7 +1188,7 @@ jobs:
           - target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-responses-api-proxy"
+            binaries: "moedex codex-code-mode-host codex-responses-api-proxy"
             verify_dmg: "true"
           - target: x86_64-apple-darwin
             bundle: app-server
@@ -1284,7 +1284,7 @@ jobs:
           case "${{ matrix.bundle }}" in
             primary)
               package_stem="codex-package"
-              package_entrypoint="codex"
+              package_entrypoint="moedex"
               ;;
             app-server)
               package_stem="codex-app-server-package"
@@ -1351,7 +1351,7 @@ jobs:
             exit 0
           fi
 
-          dmg_path="${RUNNER_TEMP}/signed-dmg/codex-${target}.dmg"
+          dmg_path="${RUNNER_TEMP}/signed-dmg/moedex-${target}.dmg"
           mount_dir="${RUNNER_TEMP}/codex-dmg-mount-${target}"
           if [[ ! -f "$dmg_path" ]]; then
             echo "Signed DMG $dmg_path not found"
@@ -1375,7 +1375,7 @@ jobs:
           done
 
           if [[ "${{ matrix.bundle }}" == "primary" ]]; then
-            [[ "$(readlink "${mount_dir}/codex")" == "bin/codex" ]]
+            [[ "$(readlink "${mount_dir}/moedex")" == "bin/moedex" ]]
             cmp "${mount_dir}/codex-package.json" "${package_dir}/codex-package.json"
             cmp "${mount_dir}/codex-resources/voice/manifest.json" \
               "${package_dir}/codex-resources/voice/manifest.json"
@@ -1385,7 +1385,7 @@ jobs:
 
           cleanup_mount
           trap - EXIT
-          cp "$dmg_path" "dist/${target}/codex-${target}.dmg"
+          cp "$dmg_path" "dist/${target}/moedex-${target}.dmg"
 
       - name: Upload verified macOS artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -1408,13 +1408,15 @@ jobs:
     needs: tag-check
     uses: ./.github/workflows/rust-release-windows.yml
     secrets: inherit
+    with:
+      publish: ${{ vars.MOEDEX_ENABLE_PUBLISH == 'true' && github.repository == 'zak-keown/moedex' }}
 
   argument-comment-lint-release-assets:
     name: argument-comment-lint release assets
     needs: tag-check
     uses: ./.github/workflows/rust-release-argument-comment-lint.yml
     with:
-      publish: true
+      publish: ${{ vars.MOEDEX_ENABLE_PUBLISH == 'true' && github.repository == 'zak-keown/moedex' }}
 
   stage-npm-packages:
     name: stage npm packages
@@ -1478,6 +1480,8 @@ jobs:
       - stage-npm-packages
     if: >-
       ${{
+        vars.MOEDEX_ENABLE_PUBLISH == 'true' &&
+        github.repository == 'zak-keown/moedex' &&
         always() &&
         needs.tag-check.result == 'success' &&
         needs.build.result == 'success' &&
@@ -1627,6 +1631,7 @@ jobs:
   publish-r2-assets:
     name: publish-r2-assets
     needs: release
+    if: ${{ vars.MOEDEX_ENABLE_R2_PUBLISH == 'true' }}
     permissions:
       contents: read
     uses: ./.github/workflows/r2-release.yml
@@ -1640,6 +1645,7 @@ jobs:
   publish-r2:
     name: publish-r2
     needs: [release, publish-dotslash, publish-r2-assets]
+    if: ${{ vars.MOEDEX_ENABLE_R2_PUBLISH == 'true' }}
     permissions:
       contents: read
     uses: ./.github/workflows/r2-release.yml
@@ -1653,6 +1659,7 @@ jobs:
   publish-dotslash:
     name: publish-dotslash
     needs: release
+    if: ${{ vars.MOEDEX_ENABLE_DOTSLASH_PUBLISH == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -1683,6 +1690,7 @@ jobs:
     # Publish to npm for stable releases, numbered alphas, and alpha hotfixes.
     if: >-
       ${{
+        vars.MOEDEX_ENABLE_NPM_PUBLISH == 'true' &&
         !cancelled() &&
         needs.release.result == 'success' &&
         needs.release.outputs.should_publish_npm == 'true'
@@ -1701,7 +1709,7 @@ jobs:
           # Node 24 bundles npm >= 11.5.1, which trusted publishing requires.
           node-version: 24
           registry-url: "https://registry.npmjs.org"
-          scope: "@openai"
+          scope: "@zak-keown"
 
       - name: Download npm tarballs from release
         env:
@@ -1744,7 +1752,7 @@ jobs:
           sdk_tarball="dist/npm/codex-sdk-npm-${VERSION}.tgz"
           # Keep this list in sync with CODEX_PLATFORM_PACKAGES in
           # codex-cli/scripts/build_npm_package.py. The root wrapper advances
-          # @openai/codex@latest as soon as it publishes, so every platform
+          # @zak-keown/moedex@latest as soon as it publishes, so every platform
           # package it aliases must already exist in the registry first.
           platform_tarballs=(
             "dist/npm/codex-npm-linux-x64-${VERSION}.tgz"
@@ -1784,7 +1792,7 @@ jobs:
           done
 
           # npm returns HTTP 409 when concurrent publishes update the same
-          # packument. Every platform tarball is a version of @openai/codex,
+          # packument. Every platform tarball is a version of @zak-keown/moedex,
           # so publish all tarballs serially.
           tarballs=(
             "${platform_tarballs[@]}"
@@ -1846,6 +1854,7 @@ jobs:
     # The deploy updates developers.openai.com with the new config schema json file.
     if: >-
       ${{
+        vars.MOEDEX_ENABLE_WEBSITE_DEPLOY == 'true' &&
         !cancelled() &&
         needs.release.result == 'success' &&
         !contains(needs.release.outputs.version, '-')
@@ -1875,6 +1884,7 @@ jobs:
     # '-' in the semver string (e.g., 1.2.3-alpha.1).
     if: >-
       ${{
+        vars.MOEDEX_ENABLE_WINGET_PUBLISH == 'true' &&
         !cancelled() &&
         needs.release.result == 'success' &&
         !contains(needs.release.outputs.version, '-')
@@ -1903,6 +1913,7 @@ jobs:
     name: Update latest-alpha-cli branch
     if: >-
       ${{
+        vars.MOEDEX_ENABLE_BRANCH_UPDATE == 'true' &&
         !cancelled() &&
         needs.release.result == 'success' &&
         needs.publish-r2.result == 'success' &&

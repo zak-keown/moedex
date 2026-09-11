@@ -2,7 +2,7 @@
 
 ROOT_OF_EXTRACTED_PACKAGE
 ├── bin
-│   ├── codex[.exe]                       # CLI package only
+│   ├── moedex[.exe]                      # CLI package only
 │   ├── codex-app-server[.exe]            # app-server package only
 │   └── codex-code-mode-host[.exe]
 ├── codex-package.json
@@ -34,6 +34,19 @@ from app_server_harness import (
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 from fixtures import SmokePackage
+from fixtures import validate_extracted_package
+
+
+def test_missing_required_helper_fails_qualification(
+    package: SmokePackage, tmp_path: Path
+) -> None:
+    copied_package = tmp_path / "package"
+    shutil.copytree(package.cli_root, copied_package)
+    suffix = ".exe" if "windows" in package.target else ""
+    (copied_package / "bin" / f"codex-code-mode-host{suffix}").unlink()
+
+    with pytest.raises(AssertionError, match="missing required package helpers"):
+        validate_extracted_package(copied_package, package.target)
 
 
 @pytest.mark.parametrize(

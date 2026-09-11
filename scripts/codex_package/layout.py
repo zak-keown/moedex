@@ -1,6 +1,8 @@
 """Canonical Codex package directory layout."""
 
+import hashlib
 import json
+import os
 import shutil
 import stat
 from pathlib import Path
@@ -90,8 +92,24 @@ def build_package_dir(
         "entrypoint": f"bin/{entrypoint_name}",
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
+        "provenance": {
+            "product": "moedex",
+            "repository": "zak-keown/moedex",
+            "forkCommit": os.environ.get("STABLE_GIT_COMMIT", "unknown"),
+            "upstreamCommit": os.environ.get("STABLE_UPSTREAM_GIT_COMMIT", "unknown"),
+            "releaseChannel": os.environ.get("MOEDEX_RELEASE_CHANNEL", "github"),
+        },
+        "checksums": package_checksums(package_dir),
     }
     write_json(package_dir / "codex-package.json", metadata)
+
+
+def refresh_package_manifest(package_dir: Path) -> None:
+    metadata_path = package_dir / "codex-package.json"
+    with open(metadata_path, encoding="utf-8") as manifest_file:
+        metadata = json.load(manifest_file)
+    metadata["checksums"] = package_checksums(package_dir)
+    write_json(metadata_path, metadata)
 
 
 def validate_package_dir(
@@ -133,6 +151,16 @@ def validate_package_dir(
                 f"Invalid package metadata field {key!r}: expected {expected!r}, got {actual!r}"
             )
 
+    provenance = metadata.get("provenance")
+    if not isinstance(provenance, dict):
+        raise RuntimeError("Invalid package metadata field 'provenance'")
+    for key, expected in {
+        "product": "moedex",
+        "repository": "zak-keown/moedex",
+    }.items():
+        if provenance.get(key) != expected:
+            raise RuntimeError(f"Invalid package provenance field {key!r}")
+
     required_files = [
         Path("bin") / variant.entrypoint_name(spec),
         Path("bin") / f"codex-code-mode-host{spec.exe_suffix}",
@@ -162,6 +190,21 @@ def validate_package_dir(
         if not path.is_file():
             raise RuntimeError(f"Missing package file: {relative_file}")
 
+    checksums = metadata.get("checksums")
+    if not isinstance(checksums, dict):
+        raise RuntimeError("Invalid package metadata field 'checksums'")
+    expected_payloads = {
+        path.relative_to(package_dir).as_posix()
+        for path in package_dir.rglob("*")
+        if path.is_file() and path != metadata_path
+    }
+    if set(checksums) != expected_payloads:
+        raise RuntimeError("Package checksum manifest does not match packaged payloads")
+    for relative_file, expected_digest in checksums.items():
+        actual_digest = sha256(package_dir / relative_file)
+        if actual_digest != expected_digest:
+            raise RuntimeError(f"Package checksum mismatch: {relative_file}")
+
     if not spec.is_windows:
         for relative_file in executable_files:
             path = package_dir / relative_file
@@ -185,3 +228,19 @@ def write_json(path: Path, value: object) -> None:
 
 def is_executable(path: Path) -> bool:
     return bool(path.stat().st_mode & stat.S_IXUSR)
+
+
+def package_checksums(package_dir: Path) -> dict[str, str]:
+    return {
+        path.relative_to(package_dir).as_posix(): sha256(path)
+        for path in sorted(package_dir.rglob("*"))
+        if path.is_file() and path.name != "codex-package.json"
+    }
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as payload:
+        for chunk in iter(lambda: payload.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

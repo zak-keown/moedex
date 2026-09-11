@@ -85,14 +85,35 @@ function findCodexExecutable() {
     vendorRoot = path.join(__dirname, "..", "vendor");
   }
 
-  const codexExecutable = path.join(
-    vendorRoot,
-    targetTriple,
-    "bin",
-    process.platform === "win32" ? "moedex.exe" : "moedex",
-  );
-  if (existsSync(codexExecutable)) {
-    return codexExecutable;
+  const releaseRoot = path.join(vendorRoot, targetTriple);
+  const manifestPath = path.join(releaseRoot, "codex-package.json");
+  if (existsSync(manifestPath)) {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const requiredPaths = [
+      manifest.entrypoint,
+      `bin/codex-code-mode-host${process.platform === "win32" ? ".exe" : ""}`,
+      `${manifest.pathDir}/${process.platform === "win32" ? "rg.exe" : "rg"}`,
+    ];
+    if (process.platform === "linux") {
+      requiredPaths.push(`${manifest.resourcesDir}/bwrap`);
+    }
+    if (process.platform === "win32") {
+      requiredPaths.push(
+        `${manifest.resourcesDir}/codex-command-runner.exe`,
+        `${manifest.resourcesDir}/codex-windows-sandbox-setup.exe`,
+      );
+    }
+    const missing = requiredPaths.filter(
+      (relativePath) =>
+        typeof relativePath !== "string" ||
+        !existsSync(path.join(releaseRoot, relativePath)),
+    );
+    if (missing.length === 0) {
+      return path.join(releaseRoot, manifest.entrypoint);
+    }
+    throw new Error(
+      `Incomplete Moedex release package ${platformPackage}; missing: ${missing.join(", ")}`,
+    );
   }
 
   const packageManager = detectPackageManager();

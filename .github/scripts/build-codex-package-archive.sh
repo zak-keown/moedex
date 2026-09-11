@@ -125,7 +125,7 @@ fi
 case "$bundle" in
   primary)
     variant="codex"
-    entrypoint="codex"
+    entrypoint="moedex"
     archive_stem="codex-package"
     ;;
   app-server)
@@ -230,8 +230,10 @@ if [[ -n "$voice_signed_dir" ]]; then
 import sys
 from pathlib import Path
 from codex_package.archive import write_archive
+from codex_package.layout import refresh_package_manifest
 
 package = Path(sys.argv[1])
+refresh_package_manifest(package)
 for archive in sys.argv[2:]:
     write_archive(package, Path(archive), force=True)
 PY

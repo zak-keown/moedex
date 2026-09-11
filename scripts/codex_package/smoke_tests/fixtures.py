@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 import json
 import os
 import subprocess
@@ -6,11 +7,48 @@ import tarfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from typing import Self
 
 import pytest
 import zstandard
 from app_server_harness import MockResponsesServer
+
+
+def validate_extracted_package(package_root: Path, target: str) -> dict[str, Any]:
+    manifest = json.loads((package_root / "codex-package.json").read_text())
+    executable_suffix = ".exe" if "windows" in target else ""
+    required_paths = [
+        manifest["entrypoint"],
+        f"bin/codex-code-mode-host{executable_suffix}",
+        f"{manifest['pathDir']}/rg{executable_suffix}",
+    ]
+    if "linux" in target:
+        required_paths.append(f"{manifest['resourcesDir']}/bwrap")
+    elif "windows" in target:
+        required_paths.extend(
+            [
+                f"{manifest['resourcesDir']}/codex-command-runner.exe",
+                f"{manifest['resourcesDir']}/codex-windows-sandbox-setup.exe",
+            ]
+        )
+    missing = [path for path in required_paths if not (package_root / path).is_file()]
+    if missing:
+        raise AssertionError(f"missing required package helpers: {', '.join(missing)}")
+
+    checksums = manifest["checksums"]
+    payloads = {
+        path.relative_to(package_root).as_posix()
+        for path in package_root.rglob("*")
+        if path.is_file() and path.name != "codex-package.json"
+    }
+    assert set(checksums) == payloads, "checksum manifest does not cover every payload"
+    for relative_path, expected_digest in checksums.items():
+        actual_digest = hashlib.sha256(
+            (package_root / relative_path).read_bytes()
+        ).hexdigest()
+        assert actual_digest == expected_digest, relative_path
+    return manifest
 
 
 @dataclass(frozen=True)
@@ -37,6 +75,18 @@ class SmokePackage:
         config_dir = directory / "codex-config"
         config_dir.mkdir()
         environment = dict(os.environ)
+        conflicting_path = directory / "conflicting-path"
+        conflicting_path.mkdir()
+        for helper in ("moedex", "codex", "rg", "codex-code-mode-host"):
+            suffix = ".exe" if "windows" in target else ""
+            fake = conflicting_path / f"{helper}{suffix}"
+            fake.write_text(
+                "@echo off\r\nexit /b 91\r\n" if suffix else "#!/bin/sh\nexit 91\n"
+            )
+            fake.chmod(0o755)
+        environment["PATH"] = os.pathsep.join(
+            [str(conflicting_path), environment.get("PATH", "")]
+        )
 
         # Preserve host proxies while routing the fake localhost model directly.
         inherited_bypass = (
@@ -66,7 +116,7 @@ class SmokePackage:
                 tarfile.open(fileobj=source, mode="r|") as archive,
             ):
                 archive.extractall(extracted, filter="data")
-            manifest = json.loads((extracted / "codex-package.json").read_text())
+            manifest = validate_extracted_package(extracted, target)
             extracted_packages.append(
                 (
                     extracted,
