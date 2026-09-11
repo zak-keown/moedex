@@ -37,6 +37,43 @@ from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 from fixtures import SmokePackage
 from fixtures import validate_extracted_package
 
+PATH_ALIAS_WARNING = re.compile(
+    r"WARNING: proceeding, even though we could not create PATH aliases: .+"
+)
+
+
+def assert_tui_terminal_admission(result: subprocess.CompletedProcess[str]) -> None:
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+    lines = output.splitlines()
+    assert lines[-1:] == ["Error: stdin is not a terminal"], output
+    assert len(lines) <= 2, output
+    if len(lines) == 2:
+        assert PATH_ALIAS_WARNING.fullmatch(lines[0]), output
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    (
+        "Error: stdin is not a terminal\n",
+        "WARNING: proceeding, even though we could not create PATH aliases: permission denied\n"
+        "Error: stdin is not a terminal\n",
+    ),
+)
+def test_tui_terminal_admission_output_contract(stderr: str) -> None:
+    result = subprocess.CompletedProcess(["moedex"], 1, stdout="", stderr=stderr)
+    assert_tui_terminal_admission(result)
+
+
+def test_tui_terminal_admission_rejects_unrelated_output() -> None:
+    result = subprocess.CompletedProcess(
+        ["moedex"],
+        1,
+        stdout="",
+        stderr="unexpected warning\nError: stdin is not a terminal\n",
+    )
+    with pytest.raises(AssertionError):
+        assert_tui_terminal_admission(result)
+
 
 def test_missing_required_helper_fails_qualification(
     package: SmokePackage, tmp_path: Path
@@ -145,8 +182,7 @@ def test_packaged_interactive_launch_dispatches_tui_headlessly(
     )
 
     assert result.returncode != 0
-    output = f"{result.stdout}\n{result.stderr}".lower()
-    assert output.strip() == "stdin is not a terminal", output
+    assert_tui_terminal_admission(result)
 
 
 def test_packaged_exec_and_resume_complete_against_local_provider(

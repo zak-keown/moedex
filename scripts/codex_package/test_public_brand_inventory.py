@@ -20,6 +20,7 @@ PUBLIC_SURFACES = (
     "codex-rs/cli/src/migrate_rollouts.rs",
     "codex-rs/cli/src/queue_cmd.rs",
     "codex-rs/cli/src/sandbox_setup.rs",
+    "codex-rs/app-server/src/lib.rs",
     "codex-rs/app-server/src/request_processors/thread_processor.rs",
     "codex-rs/app-server/src/request_processors/thread_queue_processor.rs",
     "codex-rs/tui/src/app/agents_overview.rs",
@@ -39,12 +40,13 @@ PUBLIC_SURFACES = (
 )
 FORBIDDEN = re.compile(
     r"(?i)(?:\bcodex (?:app-server|archive|delete|doctor|fork|migrate-rollouts|queue|resume|sandbox|unarchive|agents)\b|"
-    r"\bCodex (?:config|home|keymap)\b|~[/\\]\.codex[/\\]config\.toml)"
+    r"\bCodex (?:config|home|keymap|couldn't start|rebuilt|detected|can rebuild|process|copies)\b|"
+    r"another Codex process|~[/\\]\.codex[/\\]config\.toml)"
 )
 
 
 class PublicBrandInventoryTest(unittest.TestCase):
-    def test_moedex_public_surfaces_do_not_leak_stock_commands_or_home(self) -> None:
+    def test_moedex_public_surfaces_do_not_leak_stock_product_names(self) -> None:
         leaks: list[str] = []
         for relative in PUBLIC_SURFACES:
             for line_number, line in enumerate(
