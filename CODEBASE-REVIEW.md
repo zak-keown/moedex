@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 14
+  fixed: 15
   stale: 0
   skipped: 1
   deferred: 0
-  open: 245
+  open: 244
 ---
 
 # Codebase Review — moedex
@@ -1456,6 +1456,10 @@ Any sandboxed command run through the legacy backend can therefore read these fi
 
 Fix: extend `USERPROFILE_ROOT_EXCLUSIONS` (or add a parallel file-name list) to cover known top-level credential dotfiles, not just credential directories.
 
+**Disposition:** fixed
+**Commit:** `18b8810892`
+**Resolved:** 2026-09-11
+**Note:** Added .npmrc/.netrc/_netrc/.pypirc/.git-credentials to USERPROFILE_ROOT_EXCLUSIONS (matched by exact top-level name, so the .npm dir entry did not cover .npmrc). setup module is #[cfg(target_os = "windows")]; exclusion behavior and the module tests could not be executed on this macOS host — change verified by inspection as an additive extension of the filtered constant.
 ### CR-040: Deny-write ACL failures are silently swallowed in the legacy sandbox
 **File:** `codex-rs/windows-sandbox-rs/src/spawn_prep.rs`
 **Anchor:** `apply_legacy_session_acl_rules`
