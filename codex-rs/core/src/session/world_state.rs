@@ -56,7 +56,10 @@ impl Session {
         } else {
             model_instructions
         };
-        let base_instructions = self.get_prompt_base_instructions().await.text;
+        // Compare against the persisted template before request-local Moedex branding is added.
+        let base_instructions = self.get_base_instructions().await;
+        let base_instructions_provenance = base_instructions.provenance.clone();
+        let base_instructions = base_instructions.text;
         let (previous_model, previous_context, base_instructions) = {
             let state = self.state.lock().await;
             (
@@ -78,8 +81,12 @@ impl Session {
                 base_instructions,
             )
         };
-        let personality_is_baked =
-            model_info.supports_personality() && base_instructions == model_instructions;
+        let personality_is_baked = model_info.supports_personality()
+            && (base_instructions == model_instructions
+                || matches!(
+                    base_instructions_provenance,
+                    Some(BaseInstructionsProvenance::Model { model }) if model == model_info.slug
+                ));
         let environment_subagents = if turn_context.config.include_environment_context {
             self.services
                 .agent_control

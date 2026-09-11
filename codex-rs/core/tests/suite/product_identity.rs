@@ -1,5 +1,7 @@
 use anyhow::Result;
 use codex_core::TurnInputRequest;
+use codex_features::Feature;
+use codex_protocol::config_types::Personality;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_assistant_message;
@@ -16,14 +18,21 @@ use std::fs;
 
 const MOEDEX_IDENTITY: &str =
     "You are operating in Moedex, an agentic coding interface based on the Codex CLI.";
+const FRIENDLY_PERSONALITY_MARKER: &str = "You have a vivid inner life as Codex:";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn moedex_identity_is_added_once_without_rewriting_resumed_history() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex();
-    let initial = builder.build(&server).await?;
+    let mut builder = test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::Personality)
+            .expect("enable personality");
+        config.personality = Some(Personality::Friendly);
+    });
+    let initial = builder.build_with_auto_env(&server).await?;
     let initial_mock = mount_sse_once(
         &server,
         sse(vec![
@@ -53,6 +62,18 @@ async fn moedex_identity_is_added_once_without_rewriting_resumed_history() -> Re
         serde_json::to_string(&initial_request.input())?
     );
     assert_eq!(initial_visible_context.matches(MOEDEX_IDENTITY).count(), 1);
+    assert_eq!(
+        initial_visible_context
+            .matches(FRIENDLY_PERSONALITY_MARKER)
+            .count(),
+        1
+    );
+    assert_eq!(
+        initial_visible_context
+            .matches("<personality_spec>")
+            .count(),
+        0
+    );
 
     let rollout_path = initial.codex.rollout_path().expect("rollout path");
     let historical_rollout = fs::read(&rollout_path)?;
@@ -89,6 +110,18 @@ async fn moedex_identity_is_added_once_without_rewriting_resumed_history() -> Re
         serde_json::to_string(&resumed_request.input())?
     );
     assert_eq!(resumed_visible_context.matches(MOEDEX_IDENTITY).count(), 1);
+    assert_eq!(
+        resumed_visible_context
+            .matches(FRIENDLY_PERSONALITY_MARKER)
+            .count(),
+        1
+    );
+    assert_eq!(
+        resumed_visible_context
+            .matches("<personality_spec>")
+            .count(),
+        1
+    );
     assert!(resumed_visible_context.contains("historical user bytes"));
     assert!(resumed_visible_context.contains("historical assistant bytes"));
 
