@@ -49,6 +49,18 @@ pub(crate) struct SpawnChildRequest<'a> {
     pub env: HashMap<String, String>,
 }
 
+/// Render a child process environment for logging as a sorted list of variable
+/// NAMES only, never their values. `env` legitimately carries ambient
+/// credentials (`OPENAI_API_KEY`, `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`, ...)
+/// that must reach the child, and this module's trace output is captured into
+/// the local log DB and feedback ring buffer by default, so values must never
+/// be written to a log record.
+fn redacted_env_for_log(env: &HashMap<String, String>) -> String {
+    let mut names = env.keys().map(String::as_str).collect::<Vec<_>>();
+    names.sort_unstable();
+    format!("{names:?}")
+}
+
 pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io::Result<Child> {
     let SpawnChildRequest {
         program,
@@ -63,8 +75,9 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
 
     env.retain(|name, _| !is_non_inheritable_env_var(name));
 
+    let env_for_log = redacted_env_for_log(&env);
     trace!(
-        "spawn_child_async: {program:?} {args:?} {arg0:?} {cwd:?} {network_sandbox_policy:?} {stdio_policy:?} {env:?}"
+        "spawn_child_async: {program:?} {args:?} {arg0:?} {cwd:?} {network_sandbox_policy:?} {stdio_policy:?} env={env_for_log}"
     );
 
     let mut cmd = Command::new(&program);
@@ -134,4 +147,37 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
     }
 
     cmd.kill_on_drop(true).spawn()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redacted_env_for_log_omits_values() {
+        let mut env = HashMap::new();
+        env.insert("OPENAI_API_KEY".to_string(), "sk-super-secret".to_string());
+        env.insert("AWS_SECRET_ACCESS_KEY".to_string(), "aws-top-secret".to_string());
+        env.insert("PATH".to_string(), "/usr/local/bin".to_string());
+
+        let rendered = redacted_env_for_log(&env);
+
+        // Variable names are safe to log; values (which include real
+        // credentials that reach the child) must never appear.
+        assert!(rendered.contains("OPENAI_API_KEY"), "names must be logged: {rendered}");
+        assert!(rendered.contains("AWS_SECRET_ACCESS_KEY"));
+        assert!(rendered.contains("PATH"));
+        assert!(
+            !rendered.contains("sk-super-secret"),
+            "secret values must not be logged: {rendered}"
+        );
+        assert!(
+            !rendered.contains("aws-top-secret"),
+            "secret values must not be logged: {rendered}"
+        );
+        assert!(
+            !rendered.contains("/usr/local/bin"),
+            "values must not be logged: {rendered}"
+        );
+    }
 }
