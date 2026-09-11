@@ -1052,6 +1052,8 @@ fn auth_uses_moedex_service_and_logout_preserves_stock(
     let store = Arc::new(Services::default());
     let key = compute_store_key(home.path())?;
     let stock = serde_json::to_string(&auth_with_prefix("stock"))?;
+    std::fs::write(home.path().join("auth.json"), &stock)?;
+    let stock_auth_file_bytes = std::fs::read(home.path().join("auth.json"))?;
     store.save("Codex Auth", &key, &stock)?;
     let stock_manager = SecretsManager::new_with_keyring_store_and_namespace(
         home.path().into(),
@@ -1075,6 +1077,10 @@ fn auth_uses_moedex_service_and_logout_preserves_stock(
     );
     assert_eq!(storage.load()?, Some(auth));
     storage.delete()?;
+    assert_eq!(
+        std::fs::read(home.path().join("auth.json"))?,
+        stock_auth_file_bytes
+    );
     assert_eq!(store.load("Codex Auth", &key)?, Some(stock.clone()));
     assert_eq!(std::fs::read(stock_file)?, stock_bytes);
     assert_eq!(

@@ -183,8 +183,18 @@ pub(super) fn get_auth_file(codex_home: &Path) -> PathBuf {
     codex_home.join("auth.json")
 }
 
-pub(super) fn delete_file_if_exists(codex_home: &Path) -> std::io::Result<bool> {
-    let auth_file = get_auth_file(codex_home);
+fn get_auth_file_in_namespace(codex_home: &Path, namespace: AuthStorageNamespace) -> PathBuf {
+    match namespace {
+        AuthStorageNamespace::Codex => get_auth_file(codex_home),
+        AuthStorageNamespace::Moedex => codex_home.join("moedex-auth.json"),
+    }
+}
+
+fn delete_file_if_exists(
+    codex_home: &Path,
+    namespace: AuthStorageNamespace,
+) -> std::io::Result<bool> {
+    let auth_file = get_auth_file_in_namespace(codex_home, namespace);
     match std::fs::remove_file(&auth_file) {
         Ok(()) => Ok(true),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -204,11 +214,20 @@ pub(super) trait AuthStorageBackend: Debug + Send + Sync {
 #[derive(Clone, Debug)]
 pub(super) struct FileAuthStorage {
     codex_home: PathBuf,
+    namespace: AuthStorageNamespace,
 }
 
 impl FileAuthStorage {
+    #[cfg(test)]
     pub(super) fn new(codex_home: PathBuf) -> Self {
-        Self { codex_home }
+        Self::new_in_namespace(codex_home, AuthStorageNamespace::Codex)
+    }
+
+    fn new_in_namespace(codex_home: PathBuf, namespace: AuthStorageNamespace) -> Self {
+        Self {
+            codex_home,
+            namespace,
+        }
     }
 
     /// Attempt to read and parse the `auth.json` file in the given `CODEX_HOME` directory.
@@ -242,17 +261,17 @@ impl FileAuthStorage {
         remove_backup: impl FnMut(&Path) -> std::io::Result<()>,
         sync_parent: impl FnMut(&Path) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
-        let auth_file = get_auth_file(&self.codex_home);
+        let auth_file = get_auth_file_in_namespace(&self.codex_home, self.namespace);
         let parent = auth_file.parent().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "auth path has no parent")
         })?;
         std::fs::create_dir_all(parent)?;
         let sequence = AUTH_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let temp = parent.join(format!(
-            ".auth.json.{}.{}.tmp",
-            std::process::id(),
-            sequence
-        ));
+        let file_name = auth_file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| std::io::Error::other("auth filename is not UTF-8"))?;
+        let temp = parent.join(format!(".{file_name}.{}.{sequence}.tmp", std::process::id()));
         let json_data = serde_json::to_vec_pretty(auth)?;
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
@@ -379,7 +398,7 @@ fn restore_previous_auth(
 
 impl AuthStorageBackend for FileAuthStorage {
     fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
-        let auth_file = get_auth_file(&self.codex_home);
+        let auth_file = get_auth_file_in_namespace(&self.codex_home, self.namespace);
         let auth_dot_json = match self.try_read_auth_json(&auth_file) {
             Ok(auth) => auth,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -393,7 +412,7 @@ impl AuthStorageBackend for FileAuthStorage {
     }
 
     fn delete(&self) -> std::io::Result<bool> {
-        delete_file_if_exists(&self.codex_home)
+        delete_file_if_exists(&self.codex_home, self.namespace)
     }
 }
 
@@ -593,7 +612,7 @@ impl AuthStorageBackend for DirectKeyringAuthStorage {
         // Simpler error mapping per style: prefer method reference over closure
         let serialized = serde_json::to_string(auth).map_err(std::io::Error::other)?;
         self.save_to_keyring(&key, &serialized)?;
-        if let Err(err) = delete_file_if_exists(&self.codex_home) {
+        if let Err(err) = delete_file_if_exists(&self.codex_home, self.namespace) {
             warn!("failed to remove CLI auth fallback file: {err}");
         }
         Ok(())
@@ -607,7 +626,7 @@ impl AuthStorageBackend for DirectKeyringAuthStorage {
             .map_err(|err| {
                 std::io::Error::other(format!("failed to delete auth from keyring: {err}"))
             })?;
-        let file_removed = delete_file_if_exists(&self.codex_home)?;
+        let file_removed = delete_file_if_exists(&self.codex_home, self.namespace)?;
         Ok(keyring_removed || file_removed)
     }
 }
@@ -686,7 +705,10 @@ impl AuthStorageBackend for SecretsKeyringAuthStorage {
                 warn!("{message}");
                 std::io::Error::other(message)
             })?;
-        if let Err(err) = delete_file_if_exists(&self.codex_home) {
+        if let Err(err) = delete_file_if_exists(
+            &self.codex_home,
+            self.direct_storage.namespace,
+        ) {
             warn!("failed to remove CLI auth fallback file: {err}");
         }
         Ok(())
@@ -701,9 +723,8 @@ impl AuthStorageBackend for SecretsKeyringAuthStorage {
                     "failed to delete auth from encrypted auth storage: {err}"
                 ))
             })?;
-        let file_removed = delete_file_if_exists(&self.codex_home)?;
         let direct_removed = self.direct_storage.delete()?;
-        Ok(keyring_removed || file_removed || direct_removed)
+        Ok(keyring_removed || direct_removed)
     }
 }
 
@@ -726,7 +747,10 @@ impl AutoAuthStorage {
                 keyring_store,
                 keyring_backend_kind,
             ),
-            file_storage: Arc::new(FileAuthStorage::new(codex_home)),
+            file_storage: Arc::new(FileAuthStorage::new_in_namespace(
+                codex_home,
+                AuthStorageNamespace::Moedex,
+            )),
         }
     }
 }
@@ -879,7 +903,9 @@ pub(super) fn create_auth_storage_with_store_and_namespace(
     namespace: AuthStorageNamespace,
 ) -> Arc<dyn AuthStorageBackend> {
     match mode {
-        AuthCredentialsStoreMode::File => Arc::new(FileAuthStorage::new(codex_home)),
+        AuthCredentialsStoreMode::File => {
+            Arc::new(FileAuthStorage::new_in_namespace(codex_home, namespace))
+        }
         AuthCredentialsStoreMode::Keyring => create_keyring_auth_storage_in_namespace(
             codex_home,
             keyring_store,
@@ -895,7 +921,7 @@ pub(super) fn create_auth_storage_with_store_and_namespace(
             );
             Arc::new(AutoAuthStorage {
                 keyring_storage,
-                file_storage: Arc::new(FileAuthStorage::new(codex_home)),
+                file_storage: Arc::new(FileAuthStorage::new_in_namespace(codex_home, namespace)),
             })
         }
         AuthCredentialsStoreMode::Ephemeral => Arc::new(EphemeralAuthStorage::new(codex_home)),

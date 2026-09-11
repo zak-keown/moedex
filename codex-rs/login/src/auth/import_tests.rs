@@ -45,7 +45,7 @@ fn keyring_storage(
         AuthCredentialsStoreMode::Keyring,
         backend,
         namespace,
-        keyring,
+        keyring.clone(),
     )
 }
 
@@ -116,6 +116,68 @@ fn importing_file_auth_writes_only_the_destination_and_redacts_outcome() -> anyh
     assert_eq!(source.read_for_test()?, Some(original.clone()));
     assert_eq!(destination.read_for_test()?, Some(original));
     assert!(!format!("{outcome:?}").contains("stock-access-token"));
+    Ok(())
+}
+
+#[test]
+fn moedex_file_auth_in_a_shared_compatibility_home_never_touches_stock_auth()
+-> anyhow::Result<()> {
+    let shared_home = tempdir()?;
+    let stock = storage(
+        shared_home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Codex,
+    );
+    let moedex = storage(
+        shared_home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Moedex,
+    );
+    let stock_auth = api_key_auth("stock-secret");
+    stock.write_for_test(&stock_auth)?;
+    let stock_bytes = fs::read(shared_home.path().join("auth.json"))?;
+
+    assert_eq!(moedex.read_for_test()?, None);
+    moedex.write_for_test(&api_key_auth("moedex-secret"))?;
+    assert_eq!(fs::read(shared_home.path().join("auth.json"))?, stock_bytes);
+    assert!(shared_home.path().join("moedex-auth.json").is_file());
+
+    assert!(moedex.delete_for_test()?);
+    assert_eq!(fs::read(shared_home.path().join("auth.json"))?, stock_bytes);
+    assert_eq!(stock.read_for_test()?, Some(stock_auth));
+    Ok(())
+}
+
+#[test]
+fn moedex_auto_fallback_in_a_shared_home_preserves_stock_auth() -> anyhow::Result<()> {
+    let shared_home = tempdir()?;
+    let stock = storage(
+        shared_home.path(),
+        AuthCredentialsStoreMode::File,
+        AuthStorageNamespace::Codex,
+    );
+    stock.write_for_test(&api_key_auth("stock-secret"))?;
+    let stock_bytes = fs::read(shared_home.path().join("auth.json"))?;
+    let keyring = Arc::new(MockKeyringStore::default());
+    let account = crate::auth::storage::compute_store_key(shared_home.path())?;
+    let moedex = AuthStorage::new_with_keyring_store(
+        shared_home.path().into(),
+        AuthCredentialsStoreMode::Auto,
+        AuthKeyringBackendKind::Direct,
+        AuthStorageNamespace::Moedex,
+        keyring.clone(),
+    );
+
+    assert_eq!(moedex.read_for_test()?, None);
+    keyring.set_error(
+        &account,
+        keyring::Error::Invalid("unavailable".into(), "save".into()),
+    );
+    moedex.write_for_test(&api_key_auth("moedex-secret"))?;
+    assert_eq!(fs::read(shared_home.path().join("auth.json"))?, stock_bytes);
+    assert!(shared_home.path().join("moedex-auth.json").is_file());
+    moedex.delete_for_test()?;
+    assert_eq!(fs::read(shared_home.path().join("auth.json"))?, stock_bytes);
     Ok(())
 }
 
