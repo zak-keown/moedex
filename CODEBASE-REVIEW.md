@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 12
+  fixed: 13
   stale: 0
   skipped: 1
   deferred: 0
-  open: 247
+  open: 246
 ---
 
 # Codebase Review — moedex
@@ -1103,6 +1103,10 @@ dangerous_command_match(&command) // returns None
 
 `cargo test -p codex-shell-command` shows this returns `None`, whereas `env TARGET=/tmp rm -rf /tmp` (an assignment-only prefix, already covered by an existing test) correctly returns `Some(ForcedRm)`. `env -C /tmp rm -rf .` is not an obscure adversarial trick — `-C`/`--chdir` is a documented, commonly used `env` option — so this is a real gap in a security-relevant classifier under ordinary usage, not just a contrived jailbreak. The fix should special-case (or generically handle) `env` flags that consume a following value (`-C`/`--chdir`, `-u`/`--unset`, `-S`/`--split-string`, etc.) the same way `-i` is handled, rather than assuming any non-`NAME=VALUE`, non-`-i` token starts the wrapped command.
 
+**Disposition:** fixed
+**Commit:** `acb2ef1a15`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-032: Batch job validation failures abort the entire concurrent batch, bypassing `--fail-fast`
 **File:** `codex-rs/skills/src/assets/samples/imagegen/scripts/image_gen.py`
 **Anchor:** `async def run_job(i: int, job: Dict[str, Any])`
