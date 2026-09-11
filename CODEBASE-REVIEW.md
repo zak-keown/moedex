@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 21
+  fixed: 22
   stale: 0
   skipped: 1
   deferred: 4
-  open: 234
+  open: 233
 ---
 
 # Codebase Review — moedex
@@ -517,6 +517,10 @@ app::AppEvent::ApplyPreflightFinished { id, title, message, level, skipped, conf
 
 Fix: reset the inflight flags unconditionally when the corresponding event arrives (independent of whether the modal is still displaying that task), or cancel the spawned task (e.g. via a `CancellationToken`) when the modal is dismissed.
 
+**Disposition:** fixed
+**Commit:** `8e22b4d79b`
+**Resolved:** 2026-09-11
+**Note:** —
 ### CR-012: `setTimeout` spawns an unbounded native OS thread per call with no cap
 
 **File:** `codex-rs/code-mode-runtime/src/runtime/timers.rs`
