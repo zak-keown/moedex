@@ -15,11 +15,11 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 20
+  fixed: 21
   stale: 0
   skipped: 1
   deferred: 3
-  open: 236
+  open: 235
 ---
 
 # Codebase Review — moedex
@@ -428,6 +428,10 @@ targeted requests) in `PendingCallbackEntry`, and reject
 not among that set, the same way `take_connection_callback` already does for
 `verification_owner`.
 
+**Disposition:** fixed
+**Commit:** `abf6ee7f39`
+**Resolved:** 2026-09-11
+**Note:** Whole `codex-app-server` suite run: all tests pass except the pre-existing, unrelated `mcp_refresh::tests::refresh_config_preserves_thread_mcp_overrides`, which overflows the default test-thread stack on this host (reproduced on clean HEAD with my change stashed, so not caused by this fix).
 ### CR-010: Cloud config bundle cache is "signed" with a hardcoded, publicly-known HMAC key
 **File:** `codex-rs/cloud-config/src/cache.rs`
 **Anchor:** `CLOUD_CONFIG_BUNDLE_CACHE_WRITE_HMAC_KEY`
