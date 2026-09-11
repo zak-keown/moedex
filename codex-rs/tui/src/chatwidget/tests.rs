@@ -230,6 +230,16 @@ fn next_goal_draft(
     }
 }
 
+#[test]
+fn terminal_title_preview_uses_moedex_identity() {
+    let preview = crate::chatwidget::StatusSurfacePreviewData::default();
+    let app_name = preview
+        .value_for(crate::chatwidget::StatusSurfacePreviewItem::AppName)
+        .expect("app-name preview");
+
+    assert_chatwidget_snapshot!("terminal_title_preview_app_name", app_name);
+}
+
 mod app_server;
 mod approval_requests;
 #[path = "tests/backend_banners_tests.rs"]

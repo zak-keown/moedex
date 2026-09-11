@@ -4,10 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 build = "build.rs"
-default-run = "codex"
+default-run = "moedex"
 
 [[bin]]
-name = "codex"
+name = "moedex"
 path = "src/main.rs"
 
 [[bin]]
@@ -59,6 +59,7 @@ codex-mcp = { workspace = true }
 codex-model-provider = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-plugin = { workspace = true }
+codex-product-identity = { workspace = true }
 codex-protocol = { workspace = true }
 codex-responses-api-proxy = { workspace = true }
 codex-rmcp-client = { workspace = true }

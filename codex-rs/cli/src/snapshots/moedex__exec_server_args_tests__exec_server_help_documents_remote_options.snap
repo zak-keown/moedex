@@ -4,7 +4,7 @@ expression: help_text
 ---
 [EXPERIMENTAL] Run the standalone exec-server service
 
-Usage: codex exec-server [OPTIONS] [COMMAND]
+Usage: moedex exec-server [OPTIONS] [COMMAND]
 
 Commands:
   forward  Register an existing WebSocket exec-server as a remote environment
@@ -26,7 +26,7 @@ Options:
 
       --strict-config
           Error out when config.toml contains fields that are not recognized by
-          this version of Codex
+          this version of Moedex
 
       --concurrent-requests <COUNT>
           Maximum number of requests to process concurrently on each connection

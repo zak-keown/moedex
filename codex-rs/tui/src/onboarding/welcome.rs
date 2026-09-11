@@ -17,6 +17,7 @@ use crate::onboarding::keys;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 use crate::tui::FrameRequester;
+use codex_product_identity::PRODUCT_IDENTITY;
 
 use super::onboarding_screen::StepState;
 
@@ -94,8 +95,8 @@ impl WidgetRef for &WelcomeWidget {
         lines.push(Line::from(vec![
             "  ".into(),
             "Welcome to ".into(),
-            "Codex".bold(),
-            ", OpenAI's command-line coding agent".into(),
+            PRODUCT_IDENTITY.display_name.bold(),
+            " is an independent fork of OpenAI Codex (https://github.com/zak-keown/moedex).".into(),
         ]));
 
         Paragraph::new(lines)

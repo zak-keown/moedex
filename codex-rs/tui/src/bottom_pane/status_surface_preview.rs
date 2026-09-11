@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use codex_product_identity::PRODUCT_IDENTITY;
 use ratatui::text::Line;
 
 use super::status_line_from_segments;
@@ -44,7 +45,7 @@ pub(crate) enum StatusSurfacePreviewItem {
 impl StatusSurfacePreviewItem {
     fn placeholder(self) -> &'static str {
         match self {
-            StatusSurfacePreviewItem::AppName => "codex",
+            StatusSurfacePreviewItem::AppName => PRODUCT_IDENTITY.executable_name,
             StatusSurfacePreviewItem::ProjectName => "my-project",
             StatusSurfacePreviewItem::ProjectRoot => "my-project",
             StatusSurfacePreviewItem::CurrentDir => "~/my-project/subdir",

@@ -4,6 +4,7 @@ use super::*;
 use crate::line_truncation::line_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::width::display_width;
+use codex_product_identity::PRODUCT_IDENTITY;
 
 pub(crate) const SESSION_HEADER_MAX_INNER_WIDTH: usize = 56; // Just an eyeballed value
 
@@ -160,7 +161,11 @@ pub(crate) fn new_session_info(
             Line::from(vec![
                 "  ".into(),
                 "/init".into(),
-                " - create an AGENTS.md file with instructions for Codex".dim(),
+                format!(
+                    " - create an AGENTS.md file with instructions for {}",
+                    PRODUCT_IDENTITY.display_name
+                )
+                .dim(),
             ]),
             Line::from(vec![
                 "  ".into(),
@@ -170,7 +175,11 @@ pub(crate) fn new_session_info(
             Line::from(vec![
                 "  ".into(),
                 "/permissions".into(),
-                " - choose what Codex is allowed to do".dim(),
+                format!(
+                    " - choose what {} is allowed to do",
+                    PRODUCT_IDENTITY.display_name
+                )
+                .dim(),
             ]),
             Line::from(vec![
                 "  ".into(),
@@ -322,10 +331,10 @@ impl HistoryCell for SessionHeaderHistoryCell {
 
         let make_row = |spans: Vec<Span<'static>>| Line::from(spans);
 
-        // Title line rendered inside the box: ">_ OpenAI Codex (vX)"
+        // Title line rendered inside the box: ">_ Moedex (vX)"
         let title_spans: Vec<Span<'static>> = vec![
             Span::from(">_ ").dim(),
-            Span::from("OpenAI Codex").bold(),
+            Span::from(PRODUCT_IDENTITY.display_name).bold(),
             Span::from(" ").dim(),
             Span::from(format!("(v{})", self.version)).dim(),
         ];
@@ -396,7 +405,10 @@ impl HistoryCell for SessionHeaderHistoryCell {
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
         let mut lines = vec![
-            Line::from(format!("OpenAI Codex (v{})", self.version)),
+            Line::from(format!(
+                "{} (v{})",
+                PRODUCT_IDENTITY.display_name, self.version
+            )),
             Line::from(format!(
                 "model: {}{}",
                 self.model,
