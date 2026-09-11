@@ -17,6 +17,7 @@ use crate::onboarding::keys;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 use crate::tui::FrameRequester;
+use codex_product_identity::PRODUCT_IDENTITY;
 
 use super::onboarding_screen::StepState;
 
@@ -93,10 +94,12 @@ impl WidgetRef for &WelcomeWidget {
         }
         lines.push(Line::from(vec![
             "  ".into(),
-            "Welcome to ".into(),
-            "Codex".bold(),
-            ", OpenAI's command-line coding agent".into(),
+            format!("Welcome to {}.", PRODUCT_IDENTITY.display_name).bold(),
         ]));
+        lines.push(Line::from(format!(
+            "  {} is an independent fork of OpenAI Codex (https://github.com/{}).",
+            PRODUCT_IDENTITY.display_name, PRODUCT_IDENTITY.github_repository
+        )));
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -165,6 +168,36 @@ mod tests {
 
         let welcome_row = row_containing(&buf, "Welcome");
         assert_eq!(welcome_row, Some(0));
+    }
+
+    #[test]
+    fn welcome_copy_wraps_at_useful_widths() {
+        let widget = WelcomeWidget::new(
+            /*is_logged_in*/ false,
+            FrameRequester::test_dummy(),
+            /*animations_enabled*/ false,
+        );
+        let rendered = [72, 42]
+            .into_iter()
+            .map(|width| {
+                let area = Rect::new(0, 0, width, 8);
+                let mut buffer = Buffer::empty(area);
+                (&widget).render_ref(area, &mut buffer);
+                let lines = (area.top()..area.bottom())
+                    .map(|row| {
+                        (area.left()..area.right())
+                            .map(|column| buffer[(column, row)].symbol())
+                            .collect::<String>()
+                            .trim_end()
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>();
+                format!("width {width}:\n{}", lines.join("\n"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        insta::assert_snapshot!("welcome_copy_wraps_at_useful_widths", rendered);
     }
 
     #[test]

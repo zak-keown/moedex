@@ -128,6 +128,7 @@ mod pending_input;
 mod permissions_messages;
 mod personality;
 mod plugins;
+mod product_identity;
 mod prompt_cache_key;
 mod prompt_caching;
 mod prompt_debug_tests;

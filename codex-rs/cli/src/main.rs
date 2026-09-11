@@ -10,8 +10,10 @@ use codex_arg0::Arg0DispatchPaths;
 use codex_arg0::arg0_dispatch_or_else;
 use codex_chatgpt::apply_command::ApplyCommand;
 use codex_chatgpt::apply_command::run_apply_command;
+use codex_cli::ImportCommand;
 use codex_cli::read_access_token_from_stdin;
 use codex_cli::read_api_key_from_stdin;
+use codex_cli::run_import_command;
 use codex_cli::run_login_status;
 use codex_cli::run_login_with_access_token;
 use codex_cli::run_login_with_api_key;
@@ -108,24 +110,26 @@ use codex_login::read_codex_access_token_from_env;
 use codex_memories_write::clear_memory_roots_contents;
 use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::RefreshStrategy;
+use codex_product_identity::PRODUCT_IDENTITY;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::user_input::UserInput;
 use codex_terminal_detection::TerminalName;
 
-/// Codex CLI
+/// Moedex CLI
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
 #[clap(
+    name = "moedex",
     author,
     version,
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
-    // `codex-x86_64-unknown-linux-musl`, but the help output should always use
-    // the generic `codex` command name that users run.
-    bin_name = "codex",
-    override_usage = "codex [OPTIONS] [PROMPT]\n       codex [OPTIONS] <COMMAND> [ARGS]"
+    // `moedex-x86_64-unknown-linux-musl`, but the help output should always use
+    // the generic `moedex` command name that users run.
+    bin_name = "moedex",
+    override_usage = "moedex [OPTIONS] [PROMPT]\n       moedex [OPTIONS] <COMMAND> [ARGS]"
 )]
 struct MultitoolCli {
     #[clap(flatten)]
@@ -146,10 +150,13 @@ struct MultitoolCli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
+    /// Import selected data from another agent home.
+    Import(ImportCommand),
+
     /// Browse all agent sessions on the shared local app-server daemon.
     Agents(AgentsCommand),
 
-    /// Run Codex non-interactively.
+    /// Run Moedex non-interactively.
     #[clap(visible_alias = "e")]
     Exec(ExecCli),
 
@@ -162,10 +169,10 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
-    /// Manage external MCP servers for Codex.
+    /// Manage external MCP servers for Moedex.
     Mcp(McpCli),
 
-    /// Manage Codex plugins.
+    /// Manage Moedex plugins.
     Plugin(PluginCli),
 
     /// [experimental] Run the app server or related tooling.
@@ -181,13 +188,13 @@ enum Subcommand {
     /// Generate shell completion scripts.
     Completion(CompletionCommand),
 
-    /// Update Codex to the latest version.
+    /// Update Moedex to the latest version.
     Update,
 
-    /// Diagnose local Codex installation, config, auth, and runtime health.
+    /// Diagnose local Moedex installation, config, auth, and runtime health.
     Doctor(DoctorCommand),
 
-    /// Run commands within a Codex-provided sandbox.
+    /// Run commands within a Moedex-provided sandbox.
     Sandbox(HostSandboxArgs),
 
     /// Debugging tools.
@@ -197,7 +204,7 @@ enum Subcommand {
     #[clap(hide = true)]
     Execpolicy(ExecpolicyCommand),
 
-    /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
+    /// Apply the latest diff produced by the Moedex agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
     Apply(ApplyCommand),
 
@@ -312,7 +319,7 @@ struct DebugModelsCommand {
 
 #[derive(Debug, Parser)]
 struct ReviewCommand {
-    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
+    /// Error out when config.toml contains fields that are not recognized by this version of Moedex.
     #[arg(long = "strict-config", default_value_t = false)]
     strict_config: bool,
 
@@ -389,7 +396,7 @@ struct SessionArchiveConfigOverrides {
     #[clap(flatten)]
     shared: SharedCliOptions,
 
-    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
+    /// Error out when config.toml contains fields that are not recognized by this version of Moedex.
     #[arg(long = "strict-config", default_value_t = false)]
     strict_config: bool,
 
@@ -468,7 +475,7 @@ type HostSandboxArgs = UnsupportedSandboxArgs;
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 #[derive(Debug, Parser)]
 struct UnsupportedSandboxArgs {
-    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer <name>.config.toml from the effective Moedex home on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 
@@ -500,13 +507,13 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`)"
+        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | moedex login --with-api-key`)"
     )]
     with_api_key: bool,
 
     #[arg(
         long = "with-access-token",
-        help = "Read the access token from stdin (e.g. `printenv CODEX_ACCESS_TOKEN | codex login --with-access-token`)"
+        help = "Read the access token from stdin (e.g. `printenv CODEX_ACCESS_TOKEN | moedex login --with-access-token`)"
     )]
     with_access_token: bool,
 
@@ -557,7 +564,7 @@ struct AppServerCommand {
     #[command(flatten)]
     code_mode_host: codex_app_server::AppServerCodeModeHostArgs,
 
-    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
+    /// Error out when config.toml contains fields that are not recognized by this version of Moedex.
     #[arg(long = "strict-config", default_value_t = false)]
     strict_config: bool,
 
@@ -609,7 +616,7 @@ struct ExecServerCommand {
     #[command(subcommand)]
     command: Option<ExecServerSubcommand>,
 
-    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
+    /// Error out when config.toml contains fields that are not recognized by this version of Moedex.
     #[arg(
         id = "exec_server_strict_config",
         long = "strict-config",
@@ -903,7 +910,10 @@ fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
 fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
     println!();
     let cmd_str = action.command_str();
-    println!("Updating Codex via `{cmd_str}`...");
+    println!(
+        "Updating {} via `{cmd_str}`...",
+        PRODUCT_IDENTITY.display_name
+    );
     let status = {
         #[cfg(windows)]
         {
@@ -945,7 +955,10 @@ fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
     if !status.success() {
         anyhow::bail!("`{cmd_str}` failed with status {status}");
     }
-    println!("\n🎉 Update ran successfully! Please restart Codex.");
+    println!(
+        "\n🎉 Update ran successfully! Please restart {}.",
+        PRODUCT_IDENTITY.display_name
+    );
     Ok(())
 }
 
@@ -958,7 +971,8 @@ fn resolve_windows_update_command_from_path(
         std::env::join_paths(std::env::split_paths(path_env).filter(|path| path.is_absolute()))?;
     if path_env.is_empty() {
         anyhow::bail!(
-            "Could not find an absolute update command `{command}` on PATH. Please update manually: https://developers.openai.com/codex/cli/"
+            "Could not find an absolute update command `{command}` on PATH. Please update manually: https://github.com/{}",
+            PRODUCT_IDENTITY.github_repository
         );
     }
     which::which_in_global(command, Some(&path_env))?
@@ -970,7 +984,9 @@ fn run_update_command() -> anyhow::Result<()> {
     #[cfg(debug_assertions)]
     {
         anyhow::bail!(
-            "`codex update` is not available in debug builds. Install a release build of Codex to use this command."
+            "`{} update` is not available in debug builds. Install a release build of {} to use this command.",
+            PRODUCT_IDENTITY.executable_name,
+            PRODUCT_IDENTITY.display_name
         );
     }
 
@@ -978,7 +994,9 @@ fn run_update_command() -> anyhow::Result<()> {
     {
         let Some(action) = codex_tui::get_update_action() else {
             anyhow::bail!(
-                "Could not detect the Codex installation method. Please update manually: https://developers.openai.com/codex/cli/"
+                "Could not detect the {} installation method. Please update manually: https://github.com/{}",
+                PRODUCT_IDENTITY.display_name,
+                PRODUCT_IDENTITY.github_repository
             );
         };
         run_update_action(action)
@@ -1156,7 +1174,10 @@ async fn cli_main(
         && let Some(agents_endpoint) = &options.remote.remote
         && root_endpoint != agents_endpoint
     {
-        anyhow::bail!("`codex agents` received conflicting remote server endpoints");
+        anyhow::bail!(
+            "`{} agents` received conflicting remote server endpoints",
+            PRODUCT_IDENTITY.executable_name
+        );
     }
     let root_remote = agents_options
         .and_then(|options| options.remote.remote.clone())
@@ -1179,6 +1200,9 @@ async fn cli_main(
 
     let open_agents_overview = matches!(&subcommand, Some(Subcommand::Agents(_)));
     match subcommand {
+        Some(Subcommand::Import(command)) => {
+            run_import_command(command).await?;
+        }
         None | Some(Subcommand::Agents(_)) => {
             prepend_config_flags(
                 &mut interactive.config_overrides,
@@ -1186,7 +1210,10 @@ async fn cli_main(
             );
             if open_agents_overview {
                 if interactive.prompt.is_some() || !interactive.images.is_empty() {
-                    anyhow::bail!("`codex agents` does not accept an initial prompt or images");
+                    anyhow::bail!(
+                        "`{} agents` does not accept an initial prompt or images",
+                        PRODUCT_IDENTITY.executable_name
+                    );
                 }
                 if root_remote.is_some()
                     && (interactive.oss
@@ -1204,12 +1231,14 @@ async fn cli_main(
                             }))
                 {
                     anyhow::bail!(
-                        "`codex agents` cannot apply local provider or additional-directory overrides to a remote server"
+                        "`{} agents` cannot apply local provider or additional-directory overrides to a remote server",
+                        PRODUCT_IDENTITY.executable_name
                     );
                 }
                 if is_workload_identity_selected() {
                     anyhow::bail!(
-                        "`codex agents` is unavailable while workload identity is active"
+                        "`{} agents` is unavailable while workload identity is active",
+                        PRODUCT_IDENTITY.executable_name
                     );
                 }
                 if root_remote.is_none() {
@@ -1218,7 +1247,10 @@ async fn cli_main(
                         root_remote_auth_token_env.clone(),
                     )?;
                     #[cfg(not(any(unix, windows)))]
-                    anyhow::bail!("`codex agents` requires `--remote` on this platform");
+                    anyhow::bail!(
+                        "`{} agents` requires `--remote` on this platform",
+                        PRODUCT_IDENTITY.executable_name
+                    );
                 }
                 interactive.agents_overview = true;
             }
@@ -1625,7 +1657,8 @@ async fn cli_main(
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
+                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | {} login --with-api-key`.",
+                            PRODUCT_IDENTITY.executable_name,
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
@@ -1748,7 +1781,10 @@ async fn cli_main(
             #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
             {
                 let _ = loader_overrides;
-                anyhow::bail!("`codex sandbox` is not supported on this operating system");
+                anyhow::bail!(
+                    "`{} sandbox` is not supported on this operating system",
+                    PRODUCT_IDENTITY.executable_name
+                );
             }
         }
         Some(Subcommand::Debug(DebugCommand { subcommand })) => match subcommand {
@@ -1929,7 +1965,8 @@ fn profile_v2_for_subcommand<'a>(
             subcommand: DebugSubcommand::PromptInput(_),
         }) => Ok(Some(profile_v2)),
         _ => anyhow::bail!(
-            "--profile only applies to runtime commands and `codex mcp`: `codex`, `codex exec`, `codex review`, `codex resume`, `codex queue`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex mcp`, `codex sandbox`, and `codex debug prompt-input`."
+            "--profile only applies to runtime commands and `{0} mcp`: `{0}`, `{0} exec`, `{0} review`, `{0} resume`, `{0} queue`, `{0} archive`, `{0} delete`, `{0} unarchive`, `{0} fork`, `{0} mcp`, `{0} sandbox`, and `{0} debug prompt-input`.",
+            PRODUCT_IDENTITY.executable_name
         ),
     }
 }
@@ -1941,10 +1978,12 @@ async fn run_exec_server_command(
     strict_config: bool,
 ) -> anyhow::Result<()> {
     cmd.validate_remote_transport()?;
-    let codex_self_exe = arg0_paths
-        .codex_self_exe
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("Codex executable path is not configured"))?;
+    let codex_self_exe = arg0_paths.codex_self_exe.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "{} executable path is not configured",
+            PRODUCT_IDENTITY.display_name
+        )
+    })?;
     let runtime_paths =
         ExecServerRuntimePaths::new(codex_self_exe, arg0_paths.codex_linux_sandbox_exe.clone())?;
     if let Some(base_url) = cmd.remote.take() {
@@ -2096,7 +2135,10 @@ async fn load_exec_server_remote_auth_provider(
 
     let (auth_manager, auth) = load_exec_server_remote_auth(
         config,
-        "remote exec-server registration requires ChatGPT authentication or API key authentication; run `codex login` or set CODEX_API_KEY",
+        format!(
+            "remote exec-server registration requires ChatGPT authentication or API key authentication; run `{} login` or set CODEX_API_KEY",
+            PRODUCT_IDENTITY.executable_name,
+        ),
     )
     .await?;
 
@@ -2197,7 +2239,7 @@ async fn load_exec_server_config(
 
 async fn load_exec_server_remote_auth(
     config: &codex_core::config::Config,
-    missing_auth_error: &'static str,
+    missing_auth_error: String,
 ) -> anyhow::Result<(Arc<AuthManager>, codex_login::CodexAuth)> {
     let auth_manager =
         AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ true).await?;
@@ -2472,12 +2514,14 @@ fn reject_remote_mode_for_subcommand(
 ) -> anyhow::Result<()> {
     if let Some(remote) = remote {
         anyhow::bail!(
-            "`--remote {remote}` is only supported for interactive TUI commands, not `codex {subcommand}`"
+            "`--remote {remote}` is only supported for interactive TUI commands, not `{} {subcommand}`",
+            PRODUCT_IDENTITY.executable_name
         );
     }
     if remote_auth_token_env.is_some() {
         anyhow::bail!(
-            "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex {subcommand}`"
+            "`--remote-auth-token-env` is only supported for interactive TUI commands, not `{} {subcommand}`",
+            PRODUCT_IDENTITY.executable_name
         );
     }
     Ok(())
@@ -2507,12 +2551,16 @@ fn reject_unsupported_worktree_for_subcommand(
         None => Ok(()),
         Some(Subcommand::Fork(command)) if command.session_id.is_some() && !command.last => Ok(()),
         Some(Subcommand::Fork(_)) => {
-            anyhow::bail!("`codex fork --worktree` requires an explicit session ID")
+            anyhow::bail!(
+                "`{} fork --worktree` requires an explicit session ID",
+                PRODUCT_IDENTITY.executable_name
+            )
         }
         Some(Subcommand::Exec(command)) => match &command.command {
             None | Some(ExecCommand::Fork(_)) => Ok(()),
             Some(ExecCommand::Resume(_)) => anyhow::bail!(
-                "`--worktree` cannot resume an existing session; use `codex exec fork --worktree`"
+                "`--worktree` cannot resume an existing session; use `{} exec fork --worktree`",
+                PRODUCT_IDENTITY.executable_name
             ),
             Some(ExecCommand::Review(_)) => {
                 anyhow::bail!("`--worktree` is not supported for code review")
@@ -2520,7 +2568,10 @@ fn reject_unsupported_worktree_for_subcommand(
         },
         _ => {
             anyhow::bail!(
-                "`--worktree` supports new interactive sessions, `codex fork`, `codex exec`, and `codex exec fork`"
+                "`--worktree` supports new interactive sessions, `{} fork`, `{} exec`, and `{} exec fork`",
+                PRODUCT_IDENTITY.executable_name,
+                PRODUCT_IDENTITY.executable_name,
+                PRODUCT_IDENTITY.executable_name
             )
         }
     }
@@ -2578,6 +2629,7 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Mcp(_)) => Some("mcp"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
         Some(Subcommand::MigrateRollouts(_)) => Some("migrate-rollouts"),
+        Some(Subcommand::Import(_)) => Some("import"),
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         Some(Subcommand::App(_)) => Some("app"),
         Some(Subcommand::Login(_)) => Some("login"),
@@ -2613,7 +2665,10 @@ fn reject_strict_config_for_unsupported_subcommand(
     subcommand: &str,
 ) -> anyhow::Result<()> {
     if strict_config {
-        anyhow::bail!("`--strict-config` is not supported for `codex {subcommand}`");
+        anyhow::bail!(
+            "`--strict-config` is not supported for `{} {subcommand}`",
+            PRODUCT_IDENTITY.executable_name
+        );
     }
     Ok(())
 }
@@ -2722,7 +2777,8 @@ async fn run_interactive_tui(
         }
 
         eprintln!(
-            "WARNING: TERM is set to \"dumb\". Codex's interactive TUI may not work in this terminal."
+            "WARNING: TERM is set to \"dumb\". {}'s interactive TUI may not work in this terminal.",
+            PRODUCT_IDENTITY.display_name
         );
         if !confirm("Continue anyway? [y/N]: ")? {
             return Ok(AppExitInfo::fatal(
@@ -2811,7 +2867,8 @@ where
             Err(backup_err) => {
                 local_state_db::print_diagnostic_guidance(startup_error);
                 return Ok(AppExitInfo::fatal(format!(
-                    "failed to move damaged Codex local database files into a backup folder automatically: {backup_err}"
+                    "failed to move damaged {} local database files into a backup folder automatically: {backup_err}",
+                    PRODUCT_IDENTITY.display_name
                 )));
             }
         }
@@ -3003,7 +3060,7 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
 
 fn print_completion(cmd: CompletionCommand) {
     let mut app = MultitoolCli::command();
-    let name = "codex";
+    let name = PRODUCT_IDENTITY.executable_name;
     generate(cmd.shell, &mut app, name, &mut std::io::stdout());
 }
 
@@ -3026,6 +3083,13 @@ mod tests {
         let size = std::mem::size_of_val(&future);
 
         assert!(size < 64 * 1024, "interactive TUI future is {size} bytes");
+    }
+
+    #[test]
+    fn clap_command_is_moedex() {
+        let command = MultitoolCli::command();
+
+        assert_eq!(command.get_name(), "moedex");
     }
 
     #[cfg(windows)]
@@ -3328,11 +3392,20 @@ mod tests {
     }
 
     #[test]
-    fn import_remains_an_interactive_prompt() {
-        let cli = MultitoolCli::try_parse_from(["codex", "import"]).expect("parse");
+    fn import_can_still_be_submitted_as_an_explicit_interactive_prompt() {
+        let cli = MultitoolCli::try_parse_from(["moedex", "--", "import"]).expect("parse");
 
         assert!(cli.subcommand.is_none());
         assert_eq!(cli.interactive.prompt.as_deref(), Some("import"));
+    }
+
+    #[test]
+    fn import_codex_is_an_explicit_subcommand() {
+        let cli =
+            MultitoolCli::try_parse_from(["moedex", "import", "codex", "--dry-run", "--settings"])
+                .expect("parse");
+
+        assert!(matches!(cli.subcommand, Some(Subcommand::Import(_))));
     }
 
     #[test]
@@ -3699,21 +3772,69 @@ mod tests {
     }
 
     #[test]
+    fn cloud_help_preserves_the_upstream_service_name() {
+        let help = help_from_args(&["moedex", "--help"]);
+        assert!(help.contains("Browse tasks from Codex Cloud"), "{help}");
+    }
+
+    #[test]
     fn plugin_marketplace_help_uses_plugin_namespace() {
-        let help = help_from_args(&["codex", "plugin", "marketplace", "--help"]);
+        let help = help_from_args(&["moedex", "plugin", "marketplace", "--help"]);
         assert!(
-            help.contains("Usage: codex plugin marketplace [OPTIONS] <COMMAND>"),
+            help.contains(&format!(
+                "Usage: {} plugin marketplace [OPTIONS] <COMMAND>",
+                PRODUCT_IDENTITY.executable_name
+            )),
             "{help}"
         );
 
-        for (subcommand, usage) in [
-            ("add", "Usage: codex plugin marketplace add"),
-            ("list", "Usage: codex plugin marketplace list"),
-            ("upgrade", "Usage: codex plugin marketplace upgrade"),
-            ("remove", "Usage: codex plugin marketplace remove"),
+        for subcommand in ["add", "list", "upgrade", "remove"] {
+            let help = help_from_args(&["moedex", "plugin", "marketplace", subcommand, "--help"]);
+            assert!(
+                help.contains(&format!(
+                    "Usage: {} plugin marketplace {subcommand}",
+                    PRODUCT_IDENTITY.executable_name
+                )),
+                "{help}"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_and_plugin_help_use_public_moedex_commands() {
+        for args in [
+            &["moedex", "mcp", "add", "--help"][..],
+            &["moedex", "plugin", "add", "--help"][..],
+            &["moedex", "plugin", "list", "--help"][..],
+            &["moedex", "plugin", "remove", "--help"][..],
         ] {
-            let help = help_from_args(&["codex", "plugin", "marketplace", subcommand, "--help"]);
-            assert!(help.contains(usage), "{help}");
+            let help = help_from_args(args);
+            assert!(help.contains("moedex"), "{help}");
+            assert!(!help.contains("codex mcp"), "{help}");
+            assert!(!help.contains("codex plugin"), "{help}");
+        }
+    }
+
+    #[test]
+    fn bash_completion_has_no_stock_public_command_states() {
+        let mut command = MultitoolCli::command();
+        let mut output = Vec::new();
+        generate(Shell::Bash, &mut command, "moedex", &mut output);
+        let completion = String::from_utf8(output).expect("completion is UTF-8");
+
+        assert!(completion.contains("_moedex()"), "{completion}");
+        assert!(!completion.contains("\n_codex()"), "{completion}");
+        assert!(!completion.contains("codex__"), "{completion}");
+        assert!(!completion.contains("default codex"), "{completion}");
+        for public_command in [
+            "codex app-server",
+            "codex exec",
+            "codex login",
+            "codex mcp",
+            "codex plugin",
+            "codex resume",
+        ] {
+            assert!(!completion.contains(public_command), "{completion}");
         }
     }
 
@@ -4065,7 +4186,7 @@ mod tests {
             vec![
                 "Token usage: total=2 input=0 output=2".to_string(),
                 "To continue this session, run:".to_string(),
-                "  codex resume 123e4567-e89b-12d3-a456-426614174000".to_string(),
+                "  moedex resume 123e4567-e89b-12d3-a456-426614174000".to_string(),
             ]
         );
     }
@@ -4080,7 +4201,7 @@ mod tests {
                 insta::assert_snapshot!(lines.join("\n"), @"
                 Token usage: total=2 input=0 output=2
                 To continue this session, run:
-                  codex resume 123e4567-e89b-12d3-a456-426614174000
+                  moedex resume 123e4567-e89b-12d3-a456-426614174000
                 ");
             }
         }
@@ -4098,7 +4219,7 @@ mod tests {
             vec![
                 "Token usage: total=2 input=0 output=2",
                 "To continue this session, run:",
-                "  \u{1b}[36mcodex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
+                "  \u{1b}[36mmoedex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
             ]
         );
     }
@@ -4113,8 +4234,8 @@ mod tests {
         insta::assert_snapshot!(lines.join("\n"), @"
         Token usage: total=2 input=0 output=2
         To continue this session, run:
-          codex resume 123e4567-e89b-12d3-a456-426614174000
-        Or run codex resume and select my-thread.
+          moedex resume 123e4567-e89b-12d3-a456-426614174000
+        Or run moedex resume and select my-thread.
         ");
     }
 
@@ -4130,8 +4251,8 @@ mod tests {
             vec![
                 "Token usage: total=2 input=0 output=2",
                 "To continue this session, run:",
-                "  \u{1b}[36mcodex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
-                "Or run \u{1b}[36mcodex resume\u{1b}[39m and select \u{1b}[36mmy-thread\u{1b}[39m.",
+                "  \u{1b}[36mmoedex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
+                "Or run \u{1b}[36mmoedex resume\u{1b}[39m and select \u{1b}[36mmy-thread\u{1b}[39m.",
             ]
         );
     }
@@ -4519,7 +4640,10 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `codex mcp`"
+            format!(
+                "`--strict-config` is not supported for `{} mcp`",
+                PRODUCT_IDENTITY.executable_name
+            )
         );
 
         let cli = MultitoolCli::try_parse_from(["codex", "--strict-config", "remote-control"])
@@ -4532,7 +4656,10 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `codex remote-control`"
+            format!(
+                "`--strict-config` is not supported for `{} remote-control`",
+                PRODUCT_IDENTITY.executable_name
+            )
         );
     }
 
@@ -4548,7 +4675,10 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `codex app-server proxy`"
+            format!(
+                "`--strict-config` is not supported for `{} app-server proxy`",
+                PRODUCT_IDENTITY.executable_name
+            )
         );
     }
 

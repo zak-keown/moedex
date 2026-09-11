@@ -672,7 +672,7 @@ impl App {
                 color_eyre::eyre::eyre!(
                     "Invalid `tui.keymap` configuration: {err}\n\
 Fix the config and retry.\n\
-See the Codex keymap documentation for supported actions and examples."
+See the Moedex keymap documentation for supported actions and examples."
                 )
             })?;
         #[cfg(not(debug_assertions))]

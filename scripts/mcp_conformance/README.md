@@ -15,14 +15,14 @@ First install the frozen workspace dependencies and build Codex:
 
 ```bash
 pnpm install --frozen-lockfile
-cargo build --locked --manifest-path codex-rs/Cargo.toml -p codex-cli --bin codex
+cargo build --locked --manifest-path codex-rs/Cargo.toml -p codex-cli --bin moedex
 ```
 
 From a published Codex checkout, run:
 
 ```bash
 python3 scripts/mcp_conformance/run_codex_compliance.py \
-  codex-rs/target/debug/codex \
+  codex-rs/target/debug/moedex \
   --conformance-cli node_modules/@modelcontextprotocol/conformance/dist/index.js \
   --baseline-report scripts/mcp_conformance/regression-baseline-v1.json \
   --report /tmp/codex-mcp-conformance.json
@@ -67,7 +67,7 @@ it to conceal a regression.
 
 ## Run the production reviewer regression gate
 
-The separate reviewer gate tests the real Codex app-server across all three
+The separate reviewer gate tests the real Moedex app-server across all three
 shipping, legacy, and modern protocol modes. It covers stdio and localhost
 HTTP, exact-integer tool and elicitation schemas, bounded multi-round requests,
 malformed discovery response IDs, repeated pagination cursors, SSE framing and

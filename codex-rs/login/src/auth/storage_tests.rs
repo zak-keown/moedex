@@ -65,6 +65,187 @@ async fn file_storage_save_persists_auth_dot_json() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn file_storage_replace_failure_preserves_previous_auth_and_removes_plaintext_temp()
+-> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    let original = auth_with_prefix("original");
+    storage.save(&original)?;
+
+    let error = storage
+        .save_with_atomic_replace_for_test(&auth_with_prefix("replacement"), |_temp, _target| {
+            Err(std::io::Error::other("injected replace failure"))
+        })
+        .expect_err("replace must fail");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    assert_eq!(storage.load()?, Some(original));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_backup_cleanup_failure_rolls_back_after_replacement() -> anyhow::Result<()> {
+    use std::cell::Cell;
+
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    let original = auth_with_prefix("original");
+    storage.save(&original)?;
+    let rejected_cleanup = Cell::new(false);
+
+    let error = storage
+        .save_with_cleanup_ops_for_test(
+            &auth_with_prefix("replacement"),
+            |path| {
+                if path
+                    .extension()
+                    .is_some_and(|extension| extension == "backup")
+                {
+                    rejected_cleanup.set(true);
+                    return Err(std::io::Error::other("injected backup cleanup failure"));
+                }
+                std::fs::remove_file(path)
+            },
+            sync_parent_directory,
+        )
+        .expect_err("cleanup failure must roll back");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    assert!(rejected_cleanup.get());
+    assert_eq!(storage.load()?, Some(original));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_success_syncs_parent_after_plaintext_backup_removal() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    storage.save(&auth_with_prefix("original"))?;
+    let replacement = auth_with_prefix("replacement");
+    let mut sync_count = 0;
+
+    storage.save_with_cleanup_ops_for_test(
+        &replacement,
+        |path| std::fs::remove_file(path),
+        |parent| {
+            sync_count += 1;
+            sync_parent_directory(parent)
+        },
+    )?;
+
+    assert_eq!(sync_count, 2);
+    assert_eq!(storage.load()?, Some(replacement));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[test]
+fn windows_atomic_replace_abstraction_commits_existing_target_without_residue() -> anyhow::Result<()>
+{
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    storage.save(&auth_with_prefix("original"))?;
+    let replacement = auth_with_prefix("replacement");
+
+    storage.save_with_atomic_replace_for_test(&replacement, |temp, target| {
+        replace_auth_file_windows_with_ops(
+            temp,
+            target,
+            |_temp, _target| panic!("existing target must use atomic replacement"),
+            |target, replacement| std::fs::rename(replacement, target),
+        )
+    })?;
+
+    assert_eq!(storage.load()?, Some(replacement));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[test]
+fn windows_atomic_replace_abstraction_preserves_old_target_on_reported_failure()
+-> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    let original = auth_with_prefix("original");
+    storage.save(&original)?;
+
+    let error = storage
+        .save_with_atomic_replace_for_test(&auth_with_prefix("replacement"), |temp, target| {
+            replace_auth_file_windows_with_ops(
+                temp,
+                target,
+                |_temp, _target| panic!("existing target must use atomic replacement"),
+                |_target, _replacement| {
+                    Err(std::io::Error::other("injected atomic replacement failure"))
+                },
+            )
+        })
+        .expect_err("atomic replacement failure must propagate");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    assert_eq!(storage.load()?, Some(original));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[test]
+fn windows_initial_creation_abstraction_uses_same_volume_rename() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    let auth = auth_with_prefix("initial");
+
+    storage.save_with_atomic_replace_for_test(&auth, |temp, target| {
+        replace_auth_file_windows_with_ops(
+            temp,
+            target,
+            |temp, target| std::fs::rename(temp, target),
+            |_target, _replacement| panic!("missing target must use same-volume rename"),
+        )
+    })?;
+
+    assert_eq!(storage.load()?, Some(auth));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[test]
+fn windows_initial_creation_failure_removes_staged_credential() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+
+    let error = storage
+        .save_with_atomic_replace_for_test(&auth_with_prefix("initial"), |temp, target| {
+            replace_auth_file_windows_with_ops(
+                temp,
+                target,
+                |_temp, _target| Err(std::io::Error::other("injected creation failure")),
+                |_target, _replacement| panic!("missing target must use same-volume rename"),
+            )
+        })
+        .expect_err("creation failure must propagate");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    assert_eq!(storage.load()?, None);
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+fn auth_residue_count(home: &Path) -> std::io::Result<usize> {
+    Ok(std::fs::read_dir(home)?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.ends_with(".tmp") || name.ends_with(".backup") || name.contains("auth-backup")
+        })
+        .count())
+}
+
 #[tokio::test]
 async fn file_storage_round_trips_agent_identity_auth() -> anyhow::Result<()> {
     let codex_home = tempdir()?;
@@ -281,11 +462,12 @@ fn file_storage_delete_removes_auth_file() -> anyhow::Result<()> {
         AuthKeyringBackendKind::default(),
     );
     storage.save(&auth_dot_json)?;
-    assert!(dir.path().join("auth.json").exists());
-    let storage = FileAuthStorage::new(dir.path().to_path_buf());
+    assert!(dir.path().join("moedex-auth.json").exists());
+    let storage =
+        FileAuthStorage::new_in_namespace(dir.path().to_path_buf(), AuthStorageNamespace::Moedex);
     let removed = storage.delete()?;
     assert!(removed);
-    assert!(!dir.path().join("auth.json").exists());
+    assert!(!dir.path().join("moedex-auth.json").exists());
     Ok(())
 }
 
@@ -316,7 +498,7 @@ fn ephemeral_storage_save_load_delete_is_in_memory_only() -> anyhow::Result<()> 
     assert!(removed);
     let loaded = storage.load()?;
     assert_eq!(None, loaded);
-    assert!(!get_auth_file(dir.path()).exists());
+    assert!(!get_auth_file_in_namespace(dir.path(), AuthStorageNamespace::Moedex).exists());
     Ok(())
 }
 
@@ -329,14 +511,14 @@ fn seed_secrets_backend_and_fallback_auth_file_for_delete(
         codex_home.to_path_buf(),
         SecretsBackendKind::Local,
         Arc::new(mock_keyring.clone()),
-        LocalSecretsNamespace::CodexAuth,
+        LocalSecretsNamespace::MoedexAuth,
     );
     manager.set(
         &SecretScope::Global,
         &CODEX_AUTH_SECRET_NAME,
         &serde_json::to_string(auth)?,
     )?;
-    let auth_file = get_auth_file(codex_home);
+    let auth_file = get_auth_file_in_namespace(codex_home, AuthStorageNamespace::Moedex);
     std::fs::write(&auth_file, "stale")?;
     Ok(auth_file)
 }
@@ -350,7 +532,7 @@ fn seed_secrets_backend_with_auth(
         codex_home.to_path_buf(),
         SecretsBackendKind::Local,
         Arc::new(mock_keyring.clone()),
-        LocalSecretsNamespace::CodexAuth,
+        LocalSecretsNamespace::MoedexAuth,
     );
     manager.set(
         &SecretScope::Global,
@@ -369,7 +551,7 @@ fn assert_keyring_saved_auth_and_removed_fallback(
         codex_home.to_path_buf(),
         SecretsBackendKind::Local,
         Arc::new(mock_keyring.clone()),
-        LocalSecretsNamespace::CodexAuth,
+        LocalSecretsNamespace::MoedexAuth,
     );
     let saved_value = manager
         .get(&SecretScope::Global, &CODEX_AUTH_SECRET_NAME)?
@@ -387,7 +569,7 @@ fn assert_keyring_saved_auth_and_removed_fallback(
         "secrets backend should persist an encryption passphrase in the keyring"
     );
     assert!(encrypted_auth_file(codex_home).exists());
-    let auth_file = get_auth_file(codex_home);
+    let auth_file = get_auth_file_in_namespace(codex_home, AuthStorageNamespace::Moedex);
     assert!(
         !auth_file.exists(),
         "fallback auth.json should be removed after keyring save"
@@ -396,7 +578,7 @@ fn assert_keyring_saved_auth_and_removed_fallback(
 }
 
 fn encrypted_auth_file(codex_home: &Path) -> PathBuf {
-    codex_home.join("secrets").join("codex_auth.age")
+    codex_home.join("secrets").join("moedex_auth.age")
 }
 
 fn id_token_with_prefix(prefix: &str) -> IdTokenInfo {
@@ -494,7 +676,7 @@ fn direct_keyring_auth_storage_saves_legacy_keyring_entry() -> anyhow::Result<()
         codex_home.path().to_path_buf(),
         Arc::new(mock_keyring.clone()),
     );
-    let auth_file = get_auth_file(codex_home.path());
+    let auth_file = get_auth_file_in_namespace(codex_home.path(), AuthStorageNamespace::Moedex);
     std::fs::write(&auth_file, "stale")?;
     let auth = auth_with_prefix("direct");
 
@@ -524,7 +706,7 @@ fn direct_keyring_auth_storage_delete_removes_keyring_and_file() -> anyhow::Resu
     );
     let auth = auth_with_prefix("direct-delete");
     storage.save(&auth)?;
-    let auth_file = get_auth_file(codex_home.path());
+    let auth_file = get_auth_file_in_namespace(codex_home.path(), AuthStorageNamespace::Moedex);
     std::fs::write(&auth_file, "stale")?;
 
     let removed = storage.delete()?;
@@ -591,7 +773,7 @@ fn secrets_keyring_auth_storage_save_persists_and_removes_fallback_file() -> any
         codex_home.path().to_path_buf(),
         Arc::new(mock_keyring.clone()),
     );
-    let auth_file = get_auth_file(codex_home.path());
+    let auth_file = get_auth_file_in_namespace(codex_home.path(), AuthStorageNamespace::Moedex);
     std::fs::write(&auth_file, "stale")?;
     let auth = AuthDotJson {
         auth_mode: Some(AuthMode::Chatgpt),
@@ -772,7 +954,7 @@ fn auto_auth_storage_save_falls_back_when_keyring_errors() -> anyhow::Result<()>
     let auth = auth_with_prefix("fallback");
     storage.save(&auth)?;
 
-    let auth_file = get_auth_file(codex_home.path());
+    let auth_file = get_auth_file_in_namespace(codex_home.path(), AuthStorageNamespace::Moedex);
     assert!(
         auth_file.exists(),
         "fallback auth.json should be created when keyring save fails"
@@ -813,5 +995,168 @@ fn auto_auth_storage_delete_removes_keyring_and_file() -> anyhow::Result<()> {
         !auth_file.exists(),
         "fallback auth.json should be removed after delete"
     );
+    Ok(())
+}
+
+#[test]
+fn direct_auth_uses_moedex_service() -> anyhow::Result<()> {
+    auth_uses_moedex_service_and_logout_preserves_stock(AuthKeyringBackendKind::Direct)
+}
+#[test]
+fn encrypted_auth_uses_moedex_service() -> anyhow::Result<()> {
+    auth_uses_moedex_service_and_logout_preserves_stock(AuthKeyringBackendKind::Secrets)
+}
+fn auth_uses_moedex_service_and_logout_preserves_stock(
+    backend: AuthKeyringBackendKind,
+) -> anyhow::Result<()> {
+    #[derive(Debug, Default)]
+    struct Services(Mutex<HashMap<(String, String), String>>);
+    impl KeyringStore for Services {
+        fn load(
+            &self,
+            service: &str,
+            account: &str,
+        ) -> Result<Option<String>, codex_keyring_store::CredentialStoreError> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .get(&(service.into(), account.into()))
+                .cloned())
+        }
+        fn save(
+            &self,
+            service: &str,
+            account: &str,
+            value: &str,
+        ) -> Result<(), codex_keyring_store::CredentialStoreError> {
+            self.0
+                .lock()
+                .unwrap()
+                .insert((service.into(), account.into()), value.into());
+            Ok(())
+        }
+        fn delete(
+            &self,
+            service: &str,
+            account: &str,
+        ) -> Result<bool, codex_keyring_store::CredentialStoreError> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .remove(&(service.into(), account.into()))
+                .is_some())
+        }
+    }
+    let home = tempdir()?;
+    let store = Arc::new(Services::default());
+    let key = compute_store_key(home.path())?;
+    let stock = serde_json::to_string(&auth_with_prefix("stock"))?;
+    std::fs::write(home.path().join("auth.json"), &stock)?;
+    let stock_auth_file_bytes = std::fs::read(home.path().join("auth.json"))?;
+    store.save("Codex Auth", &key, &stock)?;
+    let stock_manager = SecretsManager::new_with_keyring_store_and_namespace(
+        home.path().into(),
+        SecretsBackendKind::Local,
+        store.clone(),
+        LocalSecretsNamespace::CodexAuth,
+    );
+    stock_manager.set(&SecretScope::Global, &CODEX_AUTH_SECRET_NAME, &stock)?;
+    let stock_file = home.path().join("secrets/codex_auth.age");
+    let stock_bytes = std::fs::read(&stock_file)?;
+    let auth = auth_with_prefix("moedex");
+    let storage = create_keyring_auth_storage(home.path().into(), store.clone(), backend);
+    storage.save(&auth)?;
+    let account = match backend {
+        AuthKeyringBackendKind::Direct => key.clone(),
+        AuthKeyringBackendKind::Secrets => compute_keyring_account(home.path()),
+    };
+    assert!(
+        store.load("Moedex Auth", &account)?.is_some(),
+        "Moedex service owns credentials"
+    );
+    assert_eq!(storage.load()?, Some(auth));
+    storage.delete()?;
+    assert_eq!(
+        std::fs::read(home.path().join("auth.json"))?,
+        stock_auth_file_bytes
+    );
+    assert_eq!(store.load("Codex Auth", &key)?, Some(stock.clone()));
+    assert_eq!(std::fs::read(stock_file)?, stock_bytes);
+    assert_eq!(
+        stock_manager.get(&SecretScope::Global, &CODEX_AUTH_SECRET_NAME)?,
+        Some(stock)
+    );
+    Ok(())
+}
+
+#[test]
+fn auth_writer_rejects_live_stock_owner_without_overwriting_credentials() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let state = home.path().join("app-server-daemon");
+    std::fs::create_dir(&state)?;
+    let owner = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(state.join("daemon.lock"))?;
+    owner.lock()?;
+    let auth = auth_with_prefix("stock");
+    let original = serde_json::to_string(&auth)?;
+    std::fs::write(get_auth_file(home.path()), &original)?;
+    let storage = create_auth_storage(
+        home.path().into(),
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::Direct,
+    );
+    assert_eq!(
+        storage
+            .save(&auth_with_prefix("moedex"))
+            .expect_err("live owner")
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(
+        storage.delete().expect_err("live owner").kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(
+        std::fs::read_to_string(get_auth_file(home.path()))?,
+        original
+    );
+    Ok(())
+}
+
+#[test]
+fn encrypted_auth_load_with_missing_key_never_mutates_keyring_under_stock_lock()
+-> anyhow::Result<()> {
+    let home = tempdir()?;
+    let keyring = Arc::new(MockKeyringStore::default());
+    let storage = SecretsKeyringAuthStorage::new(home.path().into(), keyring.clone());
+    storage.save(&auth_with_prefix("existing"))?;
+    let ciphertext = std::fs::read(encrypted_auth_file(home.path()))?;
+    let account = compute_keyring_account(home.path());
+    keyring.delete(KEYRING_SERVICE, &account)?;
+    let stock = home.path().join("app-server-daemon");
+    std::fs::create_dir(&stock)?;
+    let owner = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(stock.join("daemon.lock"))?;
+    owner.lock()?;
+    let guarded = GuardedAuthStorage {
+        home: home.path().into(),
+        backend: Arc::new(storage),
+    };
+    assert!(guarded.load().is_err());
+    assert!(
+        keyring.saved_value(&account).is_none(),
+        "read must not persist a new key"
+    );
+    assert_eq!(std::fs::read(encrypted_auth_file(home.path()))?, ciphertext);
     Ok(())
 }

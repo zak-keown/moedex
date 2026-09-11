@@ -26,7 +26,7 @@ use ratatui::widgets::Clear;
 use ratatui::widgets::WidgetRef;
 use tokio_stream::StreamExt;
 
-const RELEASE_NOTES_URL: &str = "https://github.com/openai/codex/releases/latest";
+const RELEASE_NOTES_URL: &str = "https://github.com/zak-keown/moedex/releases/latest";
 
 pub(crate) enum UpdatePromptOutcome {
     Continue,
@@ -256,7 +256,7 @@ mod tests {
         UpdatePromptScreen::new(
             FrameRequester::test_dummy(),
             "9.9.9".into(),
-            UpdateAction::NpmGlobalLatest,
+            UpdateAction::GitHubReleaseUnix,
         )
     }
 

@@ -233,3 +233,26 @@ fn workspace_account_detection_matches_workspace_plans() {
     };
     assert_eq!(personal.is_workspace_account(), false);
 }
+#[test]
+fn token_debug_redacts_access_refresh_and_raw_jwt_material() {
+    let tokens = TokenData {
+        id_token: IdTokenInfo {
+            raw_jwt: "raw-jwt-secret".to_string(),
+            ..IdTokenInfo::default()
+        },
+        access_token: "access-token-secret".to_string(),
+        refresh_token: "refresh-token-secret".to_string(),
+        account_id: Some("account-id".to_string()),
+    };
+
+    let token_debug = format!("{tokens:?}");
+    let id_debug = format!("{:?}", tokens.id_token);
+    for secret in [
+        "raw-jwt-secret",
+        "access-token-secret",
+        "refresh-token-secret",
+    ] {
+        assert!(!token_debug.contains(secret));
+        assert!(!id_debug.contains(secret));
+    }
+}

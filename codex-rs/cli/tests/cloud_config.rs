@@ -20,7 +20,6 @@ use tempfile::TempDir;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
-use tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::time::timeout;
 use url::Url;
@@ -122,7 +121,7 @@ impl CloudManagedConfigFixture {
     }
 
     fn command(&self, args: &[&str]) -> Result<Command> {
-        let mut command = Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
+        let mut command = Command::new(codex_utils_cargo_bin::cargo_bin("moedex")?);
         command
             .kill_on_drop(true)
             .current_dir(self.codex_home.path())
@@ -247,8 +246,11 @@ async fn login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials() -> 
         .mount(&fixture.server)
         .await;
 
-    let mut command = fixture.command(&["mcp", "login", MANAGED_SERVER_NAME])?;
-    command.stdout(Stdio::piped()).stderr(Stdio::inherit());
+    let mut command = fixture.command(&["mcp", "login", MANAGED_SERVER_NAME, "--no-browser"])?;
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
     let mut child = command.spawn()?;
     let stdout = child
         .stdout
@@ -296,39 +298,12 @@ async fn login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials() -> 
         .query_pairs_mut()
         .append_pair("code", "mock-managed-authorization-code")
         .append_pair("state", state);
-    let callback_host = callback_url
-        .host_str()
-        .context("managed MCP callback did not contain a host")?;
-    let callback_port = callback_url
-        .port_or_known_default()
-        .context("managed MCP callback did not contain a port")?;
-    let callback_path = match callback_url.query() {
-        Some(query) => format!("{}?{query}", callback_url.path()),
-        None => callback_url.path().to_string(),
-    };
-    let callback_response = timeout(Duration::from_secs(30), async {
-        let mut callback = TcpStream::connect((callback_host, callback_port)).await?;
-        callback
-            .write_all(
-                format!(
-                    "GET {callback_path} HTTP/1.1\r\nHost: {callback_host}:{callback_port}\r\nConnection: close\r\n\r\n"
-                )
-                .as_bytes(),
-            )
-            .await?;
-        let mut response_lines = BufReader::new(callback).lines();
-        response_lines
-            .next_line()
-            .await?
-            .context("managed MCP OAuth callback returned an empty HTTP response")
-    })
-    .await
-    .context("timed out waiting for the managed MCP OAuth callback response")??;
-    ensure!(
-        callback_response.starts_with("HTTP/1.1 200")
-            || callback_response.starts_with("HTTP/1.0 200"),
-        "managed MCP OAuth callback failed: {callback_response}"
-    );
+    child
+        .stdin
+        .take()
+        .context("managed MCP login did not provide callback stdin")?
+        .write_all(format!("{callback_url}\n").as_bytes())
+        .await?;
 
     let login_status = timeout(Duration::from_secs(30), child.wait())
         .await

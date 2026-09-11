@@ -1,4 +1,4 @@
-//! Implements the `codex doctor` diagnostic report.
+//! Implements the `moedex doctor` diagnostic report.
 //!
 //! Doctor is intentionally read-mostly: checks inspect the current installation,
 //! configuration, authentication, terminal, state paths, and bounded reachability
@@ -32,12 +32,15 @@ use codex_api::ApiError;
 use codex_api::ResponsesWebsocketClient;
 use codex_api::is_azure_responses_provider;
 use codex_arg0::Arg0DispatchPaths;
+use codex_build_info::BuildInfo;
+use codex_config::types::AuthCredentialsStoreMode;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::LoaderOverrides;
-use codex_core::config::find_codex_home;
+use codex_diagnostics::HomeDiagnostic;
+use codex_diagnostics::home_diagnostic;
 use codex_features::FEATURES;
 use codex_http_client::ClientRouteClass;
 use codex_http_client::HttpClientFactory;
@@ -57,6 +60,7 @@ use codex_login::default_client::create_client_without_request_logging;
 use codex_login::default_client::default_headers;
 use codex_login::load_auth_dot_json;
 use codex_model_provider::create_model_provider;
+use codex_product_identity::PRODUCT_IDENTITY;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::protocol::AskForApproval;
 use codex_terminal_detection::Multiplexer;
@@ -65,6 +69,9 @@ use codex_terminal_detection::TerminalName;
 use codex_terminal_detection::terminal_info;
 use codex_tui::Cli as TuiCli;
 use codex_utils_cli::CliConfigOverrides;
+use codex_utils_home_dir::HomeSource;
+use codex_utils_home_dir::find_codex_home;
+use codex_utils_home_dir::find_product_home;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
@@ -311,7 +318,7 @@ impl DoctorCheck {
 
 /// Builds, renders, and exits according to the current doctor report.
 ///
-/// This is the CLI entry point for codex doctor. It does not repair issues;
+/// This is the CLI entry point for moedex doctor. It does not repair issues;
 /// failures are represented in the report and cause a non-zero process exit so
 /// scripts can distinguish a clean environment from one that needs attention.
 pub async fn run_doctor(
@@ -355,6 +362,11 @@ async fn build_report(
         installation_check(!command.summary)
     }));
     checks.push(run_sync_check("runtime", progress.clone(), runtime_check));
+    checks.push(run_sync_check(
+        "effective home",
+        progress.clone(),
+        effective_home_check,
+    ));
     checks.push(run_sync_check("search", progress.clone(), search_check));
 
     progress.begin("config");
@@ -424,7 +436,7 @@ async fn build_report(
                         )
                         .detail(error.to_string())
                         .remediation(
-                            "Fix the reported authentication error, then rerun codex doctor.",
+                            "Fix the reported authentication error, then rerun moedex doctor.",
                         ),
                     })
                 },
@@ -515,7 +527,7 @@ async fn build_report(
                             "config could not be loaded",
                         )
                         .detail(err.to_string())
-                        .remediation("Fix the reported config error, then rerun codex doctor.")
+                        .remediation("Fix the reported config error, then rerun moedex doctor.")
                     })
                 },
                 async {
@@ -560,12 +572,15 @@ async fn build_report(
 
     progress.settle();
 
-    let overall_status = overall_status(&checks);
+    assemble_report(BuildInfo::get(), checks)
+}
+
+fn assemble_report(build_info: BuildInfo, checks: Vec<DoctorCheck>) -> DoctorReport {
     DoctorReport {
         schema_version: 1,
         generated_at: generated_at(),
-        overall_status,
-        codex_version: env!("CARGO_PKG_VERSION").to_string(),
+        overall_status: overall_status(&checks),
+        codex_version: build_info.version().to_string(),
         checks,
     }
 }
@@ -594,7 +609,7 @@ async fn load_config(
     .await?
     .build()
     .await
-    .context("failed to load Codex config")
+    .context("failed to load Moedex config")
 }
 
 fn config_overrides_from_interactive(
@@ -629,7 +644,7 @@ fn config_overrides_from_interactive(
     }
 }
 
-/// JSON support report emitted by `codex doctor --json`.
+/// JSON support report emitted by `moedex doctor --json`.
 ///
 /// The report is keyed by check id so support tooling can fetch paths like
 /// `checks["terminal.metadata"]` without scanning arrays. Human rendering can
@@ -712,7 +727,8 @@ fn redacted_json_report(report: &DoctorReport) -> JsonDoctorReport {
 }
 
 fn redacted_json_check(check: &DoctorCheck) -> JsonDoctorCheck {
-    let (details, notes) = structured_json_details(&check.details);
+    let (mut details, notes) = structured_json_details(&check.details);
+    add_schema_v1_detail_aliases(check.id.as_str(), &mut details);
     JsonDoctorCheck {
         id: check.id.clone(),
         category: check.category.clone(),
@@ -723,6 +739,26 @@ fn redacted_json_check(check: &DoctorCheck) -> JsonDoctorCheck {
         notes,
         remediation: check.remediation.as_deref().map(redact_detail),
         duration_ms: check.duration_ms,
+    }
+}
+
+fn add_schema_v1_detail_aliases(check_id: &str, details: &mut BTreeMap<String, JsonDetailValue>) {
+    const RUNTIME_ALIASES: &[(&str, &str)] = &[
+        ("distribution version", "version"),
+        ("fork commit", "commit"),
+    ];
+    const HOME_ALIASES: &[(&str, &str)] = &[("effective home", "CODEX_HOME")];
+    let aliases = match check_id {
+        "runtime.provenance" => RUNTIME_ALIASES,
+        "config.load" | "state.paths" | "state.home" => HOME_ALIASES,
+        _ => &[],
+    };
+    for (source, alias) in aliases {
+        if !details.contains_key(*alias)
+            && let Some(value) = details.get(*source).cloned()
+        {
+            details.insert((*alias).to_string(), value);
+        }
     }
 }
 
@@ -1064,7 +1100,7 @@ fn config_check(config: &Config) -> DoctorCheck {
     details
         .push("configuration scope: invocation config, including cloud-managed policy".to_string());
     details.push("active thread overrides: not inspected".to_string());
-    details.push(format!("CODEX_HOME: {}", config.codex_home.display()));
+    details.push(format!("effective home: {}", config.codex_home.display()));
     details.push(format!("cwd: {}", config.cwd.display()));
     details.push(format!(
         "model: {}",
@@ -1159,13 +1195,8 @@ fn config_toml_details(config: &Config, details: &mut Vec<String>) {
 }
 
 fn auth_check(config: &Config) -> DoctorCheck {
-    let mut details = Vec::new();
-    let auth_path = config.codex_home.join("auth.json");
-    details.push(format!(
-        "auth storage mode: {:?}",
-        config.cli_auth_credentials_store_mode
-    ));
-    details.push(format!("auth file: {}", auth_path.display()));
+    let mut details =
+        auth_storage_details(config.cli_auth_credentials_store_mode, &config.codex_home);
 
     let env_auth_vars = [
         OPENAI_API_KEY_ENV_VAR,
@@ -1230,8 +1261,10 @@ fn auth_check(config: &Config) -> DoctorCheck {
             let mut check =
                 DoctorCheck::new("auth.credentials", "auth", status, summary).details(details);
             if status == CheckStatus::Fail {
-                check =
-                    check.remediation("Run codex login again or provide a supported auth env var.");
+                check = check.remediation(format!(
+                    "Run {} login again or provide a supported auth env var.",
+                    PRODUCT_IDENTITY.executable_name
+                ));
             }
             check
         }
@@ -1246,10 +1279,13 @@ fn auth_check(config: &Config) -> DoctorCheck {
             "auth.credentials",
             "auth",
             CheckStatus::Fail,
-            "no Codex credentials were found",
+            "no Moedex credentials were found",
         )
         .details(details)
-        .remediation("Run codex login or provide an API key through a supported auth env var."),
+        .remediation(format!(
+            "Run {} login or provide an API key through a supported auth env var.",
+            PRODUCT_IDENTITY.executable_name
+        )),
         Err(err) => DoctorCheck::new(
             "auth.credentials",
             "auth",
@@ -1257,8 +1293,30 @@ fn auth_check(config: &Config) -> DoctorCheck {
             "stored credentials could not be read",
         )
         .detail(err.to_string())
-        .remediation("Fix auth storage access or run codex login again."),
+        .remediation(format!(
+            "Fix auth storage access or run {} login again.",
+            PRODUCT_IDENTITY.executable_name
+        )),
     }
+}
+
+fn auth_storage_details(mode: AuthCredentialsStoreMode, home: &Path) -> Vec<String> {
+    let mut details = vec![format!("auth storage mode: {mode:?}")];
+    match mode {
+        AuthCredentialsStoreMode::File | AuthCredentialsStoreMode::Auto => {
+            details.push(format!(
+                "auth file: {}",
+                home.join("moedex-auth.json").display()
+            ));
+        }
+        AuthCredentialsStoreMode::Keyring => {
+            details.push("auth file: none (keyring storage)".to_string());
+        }
+        AuthCredentialsStoreMode::Ephemeral => {
+            details.push("auth file: none (ephemeral storage)".to_string());
+        }
+    }
+    details
 }
 
 fn provider_specific_auth_check(
@@ -2051,7 +2109,7 @@ fn terminal_size_issues(inputs: &TerminalCheckInputs) -> Vec<DoctorIssue> {
 
 async fn state_check(config: &Config, command: &DoctorCommand) -> DoctorCheck {
     let mut details = Vec::new();
-    path_readiness(&mut details, "CODEX_HOME", &config.codex_home);
+    path_readiness(&mut details, "effective home", &config.codex_home);
     path_readiness(&mut details, "log dir", &config.log_dir);
     path_readiness(&mut details, "sqlite home", config.sqlite_config().home());
     let mut status = CheckStatus::Ok;
@@ -2421,23 +2479,71 @@ async fn dns_address_family_details(host: &str, port: u16) -> Vec<String> {
 }
 
 fn fallback_state_check() -> DoctorCheck {
-    let codex_home = find_codex_home();
-    match codex_home {
+    let product_home = find_product_home();
+    match product_home {
         Ok(path) => DoctorCheck::new(
             "state.paths",
             "state",
             CheckStatus::Ok,
-            "CODEX_HOME was resolved without config",
+            "effective home was resolved without config",
         )
-        .detail(format!("CODEX_HOME: {}", path.display())),
+        .detail(format!("effective home: {}", path.path.display())),
         Err(err) => DoctorCheck::new(
             "state.paths",
             "state",
             CheckStatus::Warning,
-            "CODEX_HOME could not be resolved",
+            "effective home could not be resolved",
         )
         .detail(err.to_string()),
     }
+}
+
+fn effective_home_check() -> DoctorCheck {
+    match find_product_home() {
+        Ok(home) => home_check(home_diagnostic(home)),
+        Err(err) => DoctorCheck::new(
+            "state.home",
+            "state",
+            CheckStatus::Fail,
+            "effective home could not be resolved",
+        )
+        .detail(err.to_string())
+        .remediation("Fix MOEDEX_HOME or CODEX_HOME, then rerun moedex doctor."),
+    }
+}
+
+fn home_check(home: HomeDiagnostic) -> DoctorCheck {
+    let source = match home.source {
+        HomeSource::MoedexHome => "MOEDEX_HOME",
+        HomeSource::CodexHomeCompatibility => "CODEX_HOME compatibility",
+        HomeSource::Default => "default (~/.moedex)",
+    };
+    let shared = if home.shares_codex_state { "yes" } else { "no" };
+    let (status, summary) = if home.shares_codex_state {
+        (
+            CheckStatus::Warning,
+            "effective home shares state with stock Codex",
+        )
+    } else {
+        (CheckStatus::Ok, "effective home is isolated for Moedex")
+    };
+    let mut check = DoctorCheck::new("state.home", "state", status, summary)
+        .detail(format!("effective home: {}", home.path.display()))
+        .detail(format!("home source: {source}"))
+        .detail(format!("shares stock Codex state: {shared}"));
+    if home.shares_codex_state {
+        check = check
+            .issue(
+                DoctorIssue::new(
+                    CheckStatus::Warning,
+                    "CODEX_HOME compatibility mode shares runtime state with stock Codex",
+                )
+                .field("home source")
+                .field("shares stock Codex state"),
+            )
+            .remediation("Set MOEDEX_HOME to an isolated directory to stop sharing state.");
+    }
+    check
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3073,6 +3179,164 @@ mod tests {
             DoctorCheck::new("b", "auth", CheckStatus::Fail, "fail"),
         ];
         assert_eq!(overall_status(&checks), CheckStatus::Fail);
+    }
+
+    #[test]
+    fn effective_home_reports_default_and_competing_overrides() {
+        let root = tempfile::tempdir().expect("temp home");
+        let moedex = root.path().join("moedex");
+        let codex = root.path().join("codex");
+        std::fs::create_dir_all(&moedex).expect("create Moedex home");
+        std::fs::create_dir_all(&codex).expect("create Codex home");
+
+        let default = codex_utils_home_dir::resolve_product_home(
+            /*moedex_home*/ None,
+            /*codex_home*/ None,
+            root.path(),
+        )
+        .expect("resolve default home");
+        let competing = codex_utils_home_dir::resolve_product_home(
+            Some(moedex.as_os_str()),
+            Some(codex.as_os_str()),
+            root.path(),
+        )
+        .expect("resolve competing homes");
+        let canonical_moedex = moedex.canonicalize().expect("canonical Moedex home");
+
+        assert_eq!(
+            home_check(home_diagnostic(default)).details,
+            vec![
+                format!("effective home: {}", root.path().join(".moedex").display()),
+                "home source: default (~/.moedex)".to_string(),
+                "shares stock Codex state: no".to_string(),
+            ]
+        );
+        assert_eq!(
+            home_check(home_diagnostic(competing)).details,
+            vec![
+                format!("effective home: {}", canonical_moedex.display()),
+                "home source: MOEDEX_HOME".to_string(),
+                "shares stock Codex state: no".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn compatibility_home_is_explicit_in_human_and_json_reports() {
+        let root = tempfile::tempdir().expect("temp home");
+        let codex = root.path().join("codex");
+        std::fs::create_dir_all(&codex).expect("create Codex home");
+        let selected = codex_utils_home_dir::resolve_product_home(
+            /*moedex_home*/ None,
+            Some(codex.as_os_str()),
+            root.path(),
+        )
+        .expect("resolve compatibility home");
+        let canonical_codex = codex.canonicalize().expect("canonical Codex home");
+        let check = home_check(home_diagnostic(selected));
+        let report = DoctorReport {
+            schema_version: 1,
+            generated_at: "test".to_string(),
+            overall_status: CheckStatus::Warning,
+            codex_version: "test".to_string(),
+            checks: vec![check],
+        };
+
+        let human = render_human_report(
+            &report,
+            HumanOutputOptions {
+                show_details: true,
+                show_all: false,
+                ascii: true,
+                color_enabled: false,
+            },
+        );
+        assert!(human.contains(&canonical_codex.display().to_string()));
+        assert!(human.contains("home source              CODEX_HOME compatibility"));
+        assert!(human.contains("shares stock Codex state yes"));
+        assert!(
+            human.contains("CODEX_HOME compatibility mode shares runtime state with stock Codex")
+        );
+        insta::assert_snapshot!(
+            "doctor_compatibility_home_warning",
+            human.replace(&canonical_codex.display().to_string(), "$CODEX_HOME")
+        );
+
+        let json = serde_json::to_value(redacted_json_report(&report)).expect("serialize report");
+        assert_eq!(
+            json["checks"]["state.home"]["details"]["effective home"],
+            canonical_codex.display().to_string()
+        );
+        assert_eq!(
+            json["checks"]["state.home"]["details"]["CODEX_HOME"],
+            canonical_codex.display().to_string()
+        );
+        assert_eq!(
+            json["checks"]["state.home"]["details"]["home source"],
+            "CODEX_HOME compatibility"
+        );
+        assert_eq!(
+            json["checks"]["state.home"]["details"]["shares stock Codex state"],
+            "yes"
+        );
+    }
+
+    #[test]
+    fn report_header_uses_the_distribution_version() {
+        let report = assemble_report(BuildInfo::from_version("1.2.3"), Vec::new());
+
+        assert_eq!(report.codex_version, "1.2.3");
+        let human = render_human_report(
+            &report,
+            HumanOutputOptions {
+                show_details: true,
+                show_all: false,
+                ascii: true,
+                color_enabled: false,
+            },
+        );
+        assert!(human.contains("Moedex Doctor v1.2.3"));
+        insta::assert_snapshot!("doctor_distribution_version_header", human);
+        let json = serde_json::to_value(redacted_json_report(&report)).expect("serialize report");
+        assert_eq!(json["codexVersion"], "1.2.3");
+    }
+
+    #[test]
+    fn auth_storage_details_report_only_moedex_owned_files() {
+        let home = Path::new("moedex-home");
+
+        assert_eq!(
+            auth_storage_details(AuthCredentialsStoreMode::File, home),
+            vec![
+                "auth storage mode: File".to_string(),
+                format!("auth file: {}", home.join("moedex-auth.json").display()),
+            ]
+        );
+        assert_eq!(
+            auth_storage_details(AuthCredentialsStoreMode::Keyring, home),
+            vec![
+                "auth storage mode: Keyring".to_string(),
+                "auth file: none (keyring storage)".to_string(),
+            ]
+        );
+        assert_eq!(
+            auth_storage_details(AuthCredentialsStoreMode::Ephemeral, home),
+            vec![
+                "auth storage mode: Ephemeral".to_string(),
+                "auth file: none (ephemeral storage)".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn schema_v1_home_alias_is_preserved_in_normal_and_fallback_checks() {
+        for id in ["config.load", "state.paths"] {
+            let check = DoctorCheck::new(id, "state", CheckStatus::Ok, "home resolved")
+                .detail("effective home: /tmp/moedex");
+            let json = serde_json::to_value(redacted_json_check(&check)).expect("serialize check");
+            assert_eq!(json["details"]["effective home"], "/tmp/moedex");
+            assert_eq!(json["details"]["CODEX_HOME"], "/tmp/moedex");
+        }
     }
 
     #[test]

@@ -53,6 +53,8 @@ pub enum LocalSecretsNamespace {
     ManagedSecrets,
     /// Codex authentication credentials used by the CLI, TUI, app server, and other clients.
     CodexAuth,
+    /// Moedex authentication in an independent encrypted file and keyring service.
+    MoedexAuth,
     /// OAuth credentials for external MCP servers.
     McpOAuth,
 }
@@ -162,6 +164,7 @@ impl LocalSecretsBackend {
         match self.namespace {
             LocalSecretsNamespace::ManagedSecrets => LOCAL_SECRETS_FILENAME,
             LocalSecretsNamespace::CodexAuth => CODEX_AUTH_SECRETS_FILENAME,
+            LocalSecretsNamespace::MoedexAuth => "moedex_auth.age",
             LocalSecretsNamespace::McpOAuth => MCP_OAUTH_SECRETS_FILENAME,
         }
     }
@@ -205,7 +208,9 @@ impl LocalSecretsBackend {
 
         let ciphertext = fs::read(&path)
             .with_context(|| format!("failed to read secrets file at {}", path.display()))?;
-        let passphrase = self.load_or_create_passphrase()?;
+        let passphrase = self
+            .load_passphrase()?
+            .context("missing secrets key in keyring")?;
         let cache = (self.namespace == LocalSecretsNamespace::McpOAuth).then(|| {
             let ciphertext_hash: [u8; 32] = Sha256::digest(&ciphertext).into();
             let passphrase_hash: [u8; 32] =
@@ -271,27 +276,42 @@ impl LocalSecretsBackend {
         Ok(())
     }
 
-    fn load_or_create_passphrase(&self) -> Result<SecretString> {
-        let account = compute_keyring_account(&self.codex_home);
-        let loaded = self
-            .keyring_store
-            .load(keyring_service(), &account)
-            .map_err(|err| anyhow::anyhow!(err.message()))
-            .with_context(|| format!("failed to load secrets key from keyring for {account}"))?;
-        match loaded {
-            Some(existing) => Ok(SecretString::from(existing)),
-            None => {
-                // Generate a high-entropy key and persist it in the OS keyring.
-                // This keeps secrets out of plaintext config while remaining
-                // fully local/offline for the MVP.
-                let generated = generate_passphrase()?;
-                self.keyring_store
-                    .save(keyring_service(), &account, generated.expose_secret())
-                    .map_err(|err| anyhow::anyhow!(err.message()))
-                    .context("failed to persist secrets key in keyring")?;
-                Ok(generated)
+    fn keyring_service(&self) -> &'static str {
+        match self.namespace {
+            LocalSecretsNamespace::MoedexAuth => {
+                codex_product_identity::PRODUCT_IDENTITY.credential_service
             }
+            LocalSecretsNamespace::ManagedSecrets
+            | LocalSecretsNamespace::CodexAuth
+            | LocalSecretsNamespace::McpOAuth => keyring_service(),
         }
+    }
+
+    fn load_passphrase(&self) -> Result<Option<SecretString>> {
+        let account = compute_keyring_account(&self.codex_home);
+        self.keyring_store
+            .load(self.keyring_service(), &account)
+            .map(|value| value.map(SecretString::from))
+            .map_err(|err| anyhow::anyhow!(err.message()))
+            .with_context(|| format!("failed to load secrets key from keyring for {account}"))
+    }
+
+    fn load_or_create_passphrase(&self) -> Result<SecretString> {
+        if let Some(existing) = self.load_passphrase()? {
+            return Ok(existing);
+        }
+        // Creation belongs only to the explicit write path; reads must never
+        // replace a missing key for existing ciphertext.
+        let generated = generate_passphrase()?;
+        self.keyring_store
+            .save(
+                self.keyring_service(),
+                &compute_keyring_account(&self.codex_home),
+                generated.expose_secret(),
+            )
+            .map_err(|err| anyhow::anyhow!(err.message()))
+            .context("failed to persist secrets key in keyring")?;
+        Ok(generated)
     }
 }
 

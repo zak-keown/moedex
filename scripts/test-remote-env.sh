@@ -25,7 +25,7 @@ setup_remote_env() {
   local remote_exec_server_stdout_path
 
   container_name="${CODEX_TEST_REMOTE_ENV_CONTAINER_NAME:-codex-remote-test-env-local-$(date +%s)-${RANDOM}}"
-  codex_binary_path="${CARGO_TARGET_DIR:-${REPO_ROOT}/codex-rs/target}/debug/codex"
+  codex_binary_path="${CARGO_TARGET_DIR:-${REPO_ROOT}/codex-rs/target}/debug/moedex"
 
   if ! command -v docker >/dev/null 2>&1; then
     echo "docker is required (Colima or Docker Desktop)" >&2
@@ -38,17 +38,17 @@ setup_remote_env() {
   fi
 
   if ! command -v cargo >/dev/null 2>&1; then
-    echo "cargo is required to build codex" >&2
+    echo "cargo is required to build Moedex" >&2
     return 1
   fi
 
   (
     cd "${REPO_ROOT}/codex-rs"
-    cargo build -p codex-cli --bin codex
+    cargo build -p codex-cli --bin moedex
   )
 
   if [[ ! -f "${codex_binary_path}" ]]; then
-    echo "codex binary not found at ${codex_binary_path}" >&2
+    echo "Moedex binary not found at ${codex_binary_path}" >&2
     return 1
   fi
 
@@ -65,7 +65,7 @@ setup_remote_env() {
   fi
 
   if [[ -z "${CODEX_TEST_REMOTE_EXEC_SERVER_URL:-}" ]]; then
-    remote_codex_path="/tmp/codex-remote-env/codex"
+    remote_codex_path="/tmp/codex-remote-env/moedex"
     remote_exec_server_port="31987"
     remote_exec_server_stdout_path="/tmp/codex-remote-env/exec-server.stdout"
     docker exec "${container_name}" sh -lc "mkdir -p /tmp/codex-remote-env"

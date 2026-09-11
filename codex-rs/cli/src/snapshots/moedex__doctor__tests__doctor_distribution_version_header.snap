@@ -1,0 +1,12 @@
+---
+source: cli/src/doctor.rs
+expression: human
+---
+Moedex Doctor v1.2.3
+
+
+-------------------------------------------------------------
+0 ok | 0 warn | 0 fail ok
+
+--summary compact output           --all expand truncated lists
+--json redacted report

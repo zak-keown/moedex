@@ -4,6 +4,7 @@ mod append;
 mod export;
 pub(crate) mod ledger;
 pub(crate) mod records_cla;
+pub(crate) mod records_codex;
 mod records_common;
 pub(crate) mod records_cur;
 mod title;

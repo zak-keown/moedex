@@ -19,6 +19,7 @@ impl PidBackend {
     pub(super) async fn start_inner(&self, replacement: Option<PidRecord>) -> Result<Option<u32>> {
         #[cfg(windows)]
         crate::backend::windows::ensure_not_elevated()?;
+        let args = self.command_args()?;
         if let Some(parent) = self.pid_file.parent() {
             codex_uds::prepare_private_socket_directory(parent)
                 .await
@@ -89,7 +90,7 @@ impl PidBackend {
             }
         };
         command
-            .args(self.command_args())
+            .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::from(stderr_log.into_std().await));
@@ -117,7 +118,7 @@ impl PidBackend {
                 .pid_file
                 .parent()
                 .and_then(std::path::Path::parent)
-                .context("daemon pid path has no Codex home")?;
+                .context("daemon pid path has no Moedex home")?;
             let recovery_file = codex_app_server_transport::daemon_recovery_file_path(codex_home);
             match fs::remove_file(&recovery_file).await {
                 Ok(()) => {}
@@ -127,6 +128,7 @@ impl PidBackend {
                 }
             }
         }
+        self.configure_local_home(&mut command)?;
         if let Some((key, value)) = self.command_env() {
             command.env(key, value);
         }
@@ -147,61 +149,6 @@ impl PidBackend {
         {
             use windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB;
             use windows_sys::Win32::System::Threading::DETACHED_PROCESS;
-            // Preserve process-scoped paths before changing cwd; CA names match CUSTOM_CA_ENV_KEYS.
-            for name in [
-                "CODEX_HOME",
-                "CODEX_SQLITE_HOME",
-                "CODEX_CA_CERTIFICATE",
-                "SSL_CERT_FILE",
-                "REQUESTS_CA_BUNDLE",
-                "CURL_CA_BUNDLE",
-                "NODE_EXTRA_CA_CERTS",
-                "GIT_SSL_CAINFO",
-                "CARGO_HTTP_CAINFO",
-                "PIP_CERT",
-                "BUNDLE_SSL_CA_CERT",
-                "npm_config_cafile",
-                "AWS_CONFIG_FILE",
-                "AWS_SHARED_CREDENTIALS_FILE",
-                "AWS_WEB_IDENTITY_TOKEN_FILE",
-                "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
-            ] {
-                let Some(mut value) = std::env::var_os(name) else {
-                    continue;
-                };
-                if matches!(name, "CODEX_SQLITE_HOME" | "npm_config_cafile") {
-                    value = value.to_str().unwrap_or_default().trim().into();
-                }
-                // These consumers expand `~` independently of the working directory.
-                let expands_home = if name == "npm_config_cafile" {
-                    value
-                        .to_str()
-                        .is_some_and(|path| path.starts_with("~/") || path.starts_with("~\\"))
-                } else {
-                    matches!(
-                        name,
-                        "CODEX_SQLITE_HOME" | "AWS_CONFIG_FILE" | "AWS_SHARED_CREDENTIALS_FILE"
-                    ) && std::path::Path::new(&value).starts_with("~")
-                };
-                if value.is_empty() || expands_home {
-                    continue;
-                }
-                command.env(name, std::path::absolute(value)?);
-            }
-            if let Some(value) = std::env::var_os("SSL_CERT_DIR") {
-                let paths = std::env::split_paths(&value)
-                    .filter(|path| !path.as_os_str().is_empty())
-                    .map(std::path::absolute)
-                    .collect::<std::io::Result<Vec<_>>>()?;
-                command.env("SSL_CERT_DIR", std::env::join_paths(paths)?);
-            }
-            // A Windows process pins its working directory for its lifetime.
-            // Keep both managed children out of the launching project's directory.
-            command.current_dir(
-                self.pid_file
-                    .parent()
-                    .context("daemon pid path has no parent")?,
-            );
             // Never retry inside the parent's Job Object: that would report a
             // successful launch that dies when the terminal/SSH session closes.
             command.creation_flags(DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB);
@@ -308,5 +255,83 @@ impl PidBackend {
         }
         drop(reservation_lock);
         Ok(Some(pid))
+    }
+
+    pub(super) fn configure_local_home(&self, command: &mut Command) -> Result<()> {
+        // This is a same-host child. Preserve the home selected by the parent,
+        // including relative overrides, before Windows changes the working directory.
+        let home = self
+            .pid_file
+            .parent()
+            .and_then(std::path::Path::parent)
+            .context("daemon pid path has no product home")?;
+        let home = std::path::absolute(home)?;
+        command.env(
+            codex_product_identity::PRODUCT_IDENTITY.primary_home_env,
+            &home,
+        );
+        // Older managed binaries only understand the compatibility variable.
+        command.env(
+            codex_product_identity::PRODUCT_IDENTITY.compatibility_home_env,
+            &home,
+        );
+        #[cfg(windows)]
+        {
+            // Preserve process-scoped paths before changing cwd; CA names match CUSTOM_CA_ENV_KEYS.
+            for name in [
+                "CODEX_SQLITE_HOME",
+                "CODEX_CA_CERTIFICATE",
+                "SSL_CERT_FILE",
+                "REQUESTS_CA_BUNDLE",
+                "CURL_CA_BUNDLE",
+                "NODE_EXTRA_CA_CERTS",
+                "GIT_SSL_CAINFO",
+                "CARGO_HTTP_CAINFO",
+                "PIP_CERT",
+                "BUNDLE_SSL_CA_CERT",
+                "npm_config_cafile",
+                "AWS_CONFIG_FILE",
+                "AWS_SHARED_CREDENTIALS_FILE",
+                "AWS_WEB_IDENTITY_TOKEN_FILE",
+                "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+            ] {
+                let Some(mut value) = std::env::var_os(name) else {
+                    continue;
+                };
+                if matches!(name, "CODEX_SQLITE_HOME" | "npm_config_cafile") {
+                    value = value.to_str().unwrap_or_default().trim().into();
+                }
+                // These consumers expand `~` independently of the working directory.
+                let expands_home = if name == "npm_config_cafile" {
+                    value
+                        .to_str()
+                        .is_some_and(|path| path.starts_with("~/") || path.starts_with("~\\"))
+                } else {
+                    matches!(
+                        name,
+                        "CODEX_SQLITE_HOME" | "AWS_CONFIG_FILE" | "AWS_SHARED_CREDENTIALS_FILE"
+                    ) && std::path::Path::new(&value).starts_with("~")
+                };
+                if value.is_empty() || expands_home {
+                    continue;
+                }
+                command.env(name, std::path::absolute(value)?);
+            }
+            if let Some(value) = std::env::var_os("SSL_CERT_DIR") {
+                let paths = std::env::split_paths(&value)
+                    .filter(|path| !path.as_os_str().is_empty())
+                    .map(std::path::absolute)
+                    .collect::<std::io::Result<Vec<_>>>()?;
+                command.env("SSL_CERT_DIR", std::env::join_paths(paths)?);
+            }
+            // A Windows process pins its working directory for its lifetime.
+            // Keep both managed children out of the launching project's directory.
+            command.current_dir(
+                self.pid_file
+                    .parent()
+                    .context("daemon pid path has no parent")?,
+            );
+        }
+        Ok(())
     }
 }

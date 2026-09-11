@@ -338,3 +338,16 @@ fn assert_socket_path_removed(_socket_path: &Path) {
     // uds_windows uses a regular filesystem path as its rendezvous point,
     // but there is no Unix socket filesystem node to assert on.
 }
+
+#[test]
+fn default_endpoint_is_moedex_owned_even_in_a_shared_home() {
+    let home = tempfile::TempDir::new().expect("home");
+    assert_eq!(
+        app_server_control_socket_path(home.path())
+            .expect("socket")
+            .as_path(),
+        home.path()
+            .join("moedex-app-server")
+            .join("moedex-app-server.sock")
+    );
+}

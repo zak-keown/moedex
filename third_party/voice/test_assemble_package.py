@@ -224,6 +224,41 @@ class AssembleTests(unittest.TestCase):
                 release_version="0.154.0-alpha.8",
             )
 
+    def test_release_package_accepts_canonical_moedex_entrypoint(self):
+        self.commit = "c" * 40
+        target = "aarch64-apple-darwin"
+        runtime, receipt = self.make_runtime(target, "plugins/libgst{}.dylib")
+        receipt["sourceCommit"] = self.commit
+        (runtime / "runtime.json").write_text(json.dumps(receipt))
+        staged = self.root / "staged moedex runtime"
+        stage(runtime, staged, target)
+        seal(staged, target)
+        self.metadata.update(
+            version="0.154.0-alpha.8",
+            target=target,
+            entrypoint="bin/moedex",
+        )
+        (self.package / "bin/moedex").write_bytes(b"moedex app")
+        (self.package / "codex-package.json").write_text(json.dumps(self.metadata))
+
+        assemble(
+            self.package,
+            self.helper,
+            target,
+            self.commit,
+            self.output,
+            runtime=staged,
+            release_version="0.154.0-alpha.8",
+        )
+
+        manifest = json.loads(
+            (self.output / "codex-resources/voice/manifest.json").read_text()
+        )
+        self.assertEqual(
+            manifest["sha256"]["bin/moedex"],
+            digest(self.package / "bin/moedex"),
+        )
+
     def test_alpha_receipt_requires_matching_signed_hashes(self):
         target = "x86_64-apple-darwin"
         runtime, _ = self.make_runtime(target, "plugins/libgst{}.dylib")

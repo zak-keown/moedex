@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 import json
 import os
 import subprocess
@@ -6,11 +7,48 @@ import tarfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from typing import Self
 
 import pytest
 import zstandard
 from app_server_harness import MockResponsesServer
+
+
+def validate_extracted_package(package_root: Path, target: str) -> dict[str, Any]:
+    manifest = json.loads((package_root / "codex-package.json").read_text())
+    executable_suffix = ".exe" if "windows" in target else ""
+    required_paths = [
+        manifest["entrypoint"],
+        f"bin/codex-code-mode-host{executable_suffix}",
+        f"{manifest['pathDir']}/rg{executable_suffix}",
+    ]
+    if "linux" in target:
+        required_paths.append(f"{manifest['resourcesDir']}/bwrap")
+    elif "windows" in target:
+        required_paths.extend(
+            [
+                f"{manifest['resourcesDir']}/codex-command-runner.exe",
+                f"{manifest['resourcesDir']}/codex-windows-sandbox-setup.exe",
+            ]
+        )
+    missing = [path for path in required_paths if not (package_root / path).is_file()]
+    if missing:
+        raise AssertionError(f"missing required package helpers: {', '.join(missing)}")
+
+    checksums = manifest["checksums"]
+    payloads = {
+        path.relative_to(package_root).as_posix()
+        for path in package_root.rglob("*")
+        if path.is_file() and path.name != "codex-package.json"
+    }
+    assert set(checksums) == payloads, "checksum manifest does not cover every payload"
+    for relative_path, expected_digest in checksums.items():
+        actual_digest = hashlib.sha256(
+            (package_root / relative_path).read_bytes()
+        ).hexdigest()
+        assert actual_digest == expected_digest, relative_path
+    return manifest
 
 
 @dataclass(frozen=True)
@@ -37,6 +75,18 @@ class SmokePackage:
         config_dir = directory / "codex-config"
         config_dir.mkdir()
         environment = dict(os.environ)
+        conflicting_path = directory / "conflicting-path"
+        conflicting_path.mkdir()
+        for helper in ("moedex", "codex", "rg", "codex-code-mode-host"):
+            suffix = ".exe" if "windows" in target else ""
+            fake = conflicting_path / f"{helper}{suffix}"
+            fake.write_text(
+                "@echo off\r\nexit /b 91\r\n" if suffix else "#!/bin/sh\nexit 91\n"
+            )
+            fake.chmod(0o755)
+        environment["PATH"] = os.pathsep.join(
+            [str(conflicting_path), environment.get("PATH", "")]
+        )
 
         # Preserve host proxies while routing the fake localhost model directly.
         inherited_bypass = (
@@ -66,7 +116,7 @@ class SmokePackage:
                 tarfile.open(fileobj=source, mode="r|") as archive,
             ):
                 archive.extractall(extracted, filter="data")
-            manifest = json.loads((extracted / "codex-package.json").read_text())
+            manifest = validate_extracted_package(extracted, target)
             extracted_packages.append(
                 (
                     extracted,
@@ -191,27 +241,89 @@ def code_mode_host_debug_symbols(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Path:
     target = pytestconfig.getoption("package_target")
-    binaries = {"codex", "codex-app-server", "codex-code-mode-host"}
-    if "windows" in target:
-        binaries.update({"codex-command-runner", "codex-windows-sandbox-setup"})
+    destination = tmp_path_factory.mktemp("codex-debug-symbols")
+    return extract_code_mode_host_debug_symbols(
+        target,
+        pytestconfig.getoption("cli_symbols_archive"),
+        pytestconfig.getoption("app_server_symbols_archive"),
+        destination,
+    )
 
-    if "apple-darwin" in target:
+
+def extract_code_mode_host_debug_symbols(
+    target: str,
+    cli_symbols_archive: Path,
+    app_server_symbols_archive: Path | None,
+    destination: Path,
+) -> Path:
+    if "windows" in target:
+        expected = {
+            "moedex",
+            "codex-app-server",
+            "codex-code-mode-host",
+            "codex-command-runner",
+            "codex-responses-api-proxy",
+            "codex-windows-sandbox-setup",
+        }
+        host_symbols = _validate_symbols_archive(
+            cli_symbols_archive,
+            target,
+            expected,
+            destination,
+            label="combined Windows",
+        )
+        assert host_symbols is not None
+        return host_symbols
+
+    host_symbols = _validate_symbols_archive(
+        cli_symbols_archive,
+        target,
+        {"moedex", "codex-code-mode-host", "codex-responses-api-proxy"},
+        destination,
+        label="CLI",
+    )
+    assert host_symbols is not None
+    assert app_server_symbols_archive is not None, "missing app-server symbols archive"
+    _validate_symbols_archive(
+        app_server_symbols_archive,
+        f"{target}-app-server",
+        {"codex-app-server", "codex-code-mode-host"},
+        destination,
+        label="app-server",
+        extract_host=False,
+    )
+    return host_symbols
+
+
+def _validate_symbols_archive(
+    archive_path: Path,
+    artifact_name: str,
+    binaries: set[str],
+    destination: Path,
+    *,
+    label: str,
+    extract_host: bool = True,
+) -> Path | None:
+    root = f"codex-symbols-{artifact_name}"
+    if "apple-darwin" in artifact_name:
         markers = {
             binary: f"/{binary}.dSYM/Contents/Resources/DWARF/" for binary in binaries
         }
     else:
-        extension = "pdb" if "windows" in target else "debug"
+        extension = "pdb" if "windows" in artifact_name else "debug"
         markers = {binary: f"/{binary}.{extension}" for binary in binaries}
 
-    destination = tmp_path_factory.mktemp("codex-debug-symbols")
     found: set[str] = set()
     symbol_path = None
-    with tarfile.open(pytestconfig.getoption("symbols_archive"), "r|gz") as archive:
+    with tarfile.open(archive_path, "r|gz") as archive:
         for member in archive:
             if not member.isfile():
                 continue
+            assert member.name.startswith(f"{root}/"), (
+                f"{label} symbols archive has wrong root: {member.name}"
+            )
             for binary, marker in markers.items():
-                if "apple-darwin" in target:
+                if "apple-darwin" in artifact_name:
                     _, found_marker, dwarf_name = member.name.partition(marker)
                     matches = bool(
                         found_marker and dwarf_name and "/" not in dwarf_name
@@ -221,10 +333,11 @@ def code_mode_host_debug_symbols(
                 if not matches:
                     continue
                 found.add(binary)
-                if binary == "codex-code-mode-host":
+                if binary == "codex-code-mode-host" and extract_host:
                     archive.extract(member, destination, filter="data")
                     symbol_path = destination / member.name
                 break
-    assert found == binaries, found
-    assert symbol_path is not None
+    assert found == binaries, f"{label} symbols mismatch: {found}"
+    if extract_host:
+        assert symbol_path is not None, f"{label} code-mode host symbols missing"
     return symbol_path

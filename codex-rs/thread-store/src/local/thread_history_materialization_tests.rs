@@ -1110,7 +1110,7 @@ async fn paginated_fork_reads_compressed_shared_lineage_without_materializing() 
         .expect_err("external shared source cannot be referenced by rollout id");
     assert!(matches!(
         error,
-        crate::ThreadStoreError::InvalidRequest { message } if message.contains("must be in Codex home")
+        crate::ThreadStoreError::InvalidRequest { message } if message.contains("must be in Moedex home")
     ));
     store
         .shutdown_thread(source_thread_id)

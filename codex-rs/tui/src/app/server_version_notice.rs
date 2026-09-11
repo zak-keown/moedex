@@ -48,6 +48,6 @@ impl App {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .server_version_notice =
-            older_server.map(|server| format!("Service v{server} < Codex CLI v{client_version}"));
+            older_server.map(|server| format!("Service v{server} < Moedex CLI v{client_version}"));
     }
 }

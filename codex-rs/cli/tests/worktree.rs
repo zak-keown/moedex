@@ -207,7 +207,7 @@ trust_level = "trusted"
             .plan_type("enterprise"),
         codex_config::types::AuthCredentialsStoreMode::File,
     )?;
-    let program = codex_utils_cargo_bin::cargo_bin("codex")?;
+    let program = codex_utils_cargo_bin::cargo_bin("moedex")?;
     let mut env: HashMap<String, String> = std::env::vars().collect();
     env.insert("CODEX_HOME".into(), home.display().to_string());
     env.insert("CODEX_SQLITE_HOME".into(), home.display().to_string());
@@ -392,7 +392,7 @@ trust_level = "trusted"
                 tokio::time::timeout(Duration::from_secs(/*secs*/ 10), spawned.exit_rx).await??;
             assert_ne!(exit, 0);
             assert!(output.contains("API key login is required"), "{output}");
-            assert!(!home.join("auth.json").exists());
+            assert!(!home.join("moedex-auth.json").exists());
             assert!(output.contains("The checkout was kept"), "{output}");
             continue;
         }

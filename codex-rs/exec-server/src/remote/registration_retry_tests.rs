@@ -101,7 +101,18 @@ async fn registration_requires_a_confirmed_conflict_before_replay(
             }
         }
         anyhow::ensure!(content_length <= 16_384, "registration request too large");
-        reader.read_exact(&mut vec![0; content_length]).await?;
+        let mut request_body = vec![0; content_length];
+        reader.read_exact(&mut request_body).await?;
+        let request: serde_json::Value = serde_json::from_slice(&request_body)?;
+        assert_eq!(
+            request
+                .as_object()
+                .expect("registration object")
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["executor_public_key", "security_profile"]
+        );
         drop(reader);
 
         let headers = format!(

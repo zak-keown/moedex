@@ -129,7 +129,7 @@ pub(super) fn model_upgrade_for_migration(
         model_link: None,
         upgrade_copy: None,
         migration_markdown: Some(format!(
-            "{current_name} is no longer available\n\nCodex now uses {target_name} in place of {current_name}. Switch to {target_name} to continue.\n"
+            "{current_name} is no longer available\n\nMoedex now uses {target_name} in place of {current_name}. Switch to {target_name} to continue.\n"
         )),
         retirement_at: None,
     })

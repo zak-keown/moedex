@@ -30,6 +30,7 @@
 //! Slash-command parsing lives in the bottom-pane composer, but slash-command acceptance lives
 //! here. That split lets the composer stage a recall entry before clearing input while this module
 //! records the attempted slash command after dispatch just like ordinary submitted text.
+use codex_product_identity::PRODUCT_IDENTITY;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -2070,8 +2071,11 @@ impl Drop for ChatWidget {
     }
 }
 
-const PLACEHOLDER: &str = "Ask Codex to do anything";
 const SIDE_PLACEHOLDER: &str = "Ask a follow-up question";
+
+fn placeholder() -> String {
+    format!("Ask {} to do anything", PRODUCT_IDENTITY.display_name)
+}
 
 // Extract the first bold (Markdown) element in the form **...** from `s`.
 // Returns the inner text if found; otherwise `None`.

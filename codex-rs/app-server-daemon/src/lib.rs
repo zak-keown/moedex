@@ -22,6 +22,7 @@ use backend::BackendPaths;
 use codex_app_server_protocol::RemoteControlConnectionStatus;
 use codex_app_server_protocol::RemoteControlPairingStartResponse;
 use codex_app_server_transport::app_server_control_socket_path;
+pub use codex_app_server_transport::daemon_state_dir;
 use codex_utils_home_dir::find_codex_home;
 use managed_install::managed_codex_bin;
 #[cfg(any(unix, windows))]
@@ -40,7 +41,6 @@ const PID_FILE_NAME: &str = "app-server.pid";
 const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
 const OPERATION_LOCK_FILE_NAME: &str = "daemon.lock";
 const SETTINGS_FILE_NAME: &str = "settings.json";
-const STATE_DIR_NAME: &str = "app-server-daemon";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LifecycleCommand {
@@ -285,8 +285,13 @@ fn ensure_supported_platform() -> Result<()> {
 #[cfg(not(any(unix, windows)))]
 fn ensure_supported_platform() -> Result<()> {
     Err(anyhow!(
-        "codex app-server daemon lifecycle is only supported on Unix and Windows platforms"
+        "moedex app-server daemon lifecycle is only supported on Unix and Windows platforms"
     ))
+}
+
+struct OperationLock {
+    file: tokio::fs::File,
+    _home_guard: Vec<std::fs::File>,
 }
 
 struct Daemon {
@@ -304,7 +309,7 @@ impl Daemon {
         let socket_path = app_server_control_socket_path(codex_home.as_path())?
             .as_path()
             .to_path_buf();
-        let state_dir = codex_home.as_path().join(STATE_DIR_NAME);
+        let state_dir = daemon_state_dir(codex_home.as_path());
         Ok(Self {
             socket_path,
             pid_file: state_dir.join(PID_FILE_NAME),
@@ -320,7 +325,7 @@ impl Daemon {
             self.settings_file
                 .parent()
                 .and_then(Path::parent)
-                .context("daemon settings path has no Codex home")?,
+                .context("daemon settings path has no Moedex home")?,
         ))
     }
 
@@ -393,7 +398,7 @@ impl Daemon {
             && self.running_backend(&settings).await?.is_none()
         {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by moedex app-server daemon"
             ));
         }
         if !settings.auto_update_enabled {
@@ -436,7 +441,7 @@ impl Daemon {
         managed_codex_bin: &Path,
     ) -> Result<RestartIfRunningOutcome> {
         let operation_lock = self.open_operation_lock_file().await?;
-        if !try_lock_file(&operation_lock)? {
+        if !try_lock_file(&operation_lock.file)? {
             return Ok(RestartIfRunningOutcome::Busy);
         }
         let settings = self.load_settings().await?;
@@ -494,7 +499,7 @@ impl Daemon {
             }
         } else if client::probe(&self.socket_path).await.is_ok() {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by moedex app-server daemon"
             ));
         } else {
             RestartIfRunningOutcome::NotRunning
@@ -530,7 +535,7 @@ impl Daemon {
 
         if client::probe(&self.socket_path).await.is_ok() {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by moedex app-server daemon"
             ));
         }
 
@@ -645,7 +650,7 @@ impl Daemon {
 
         if backend.is_none() && client::probe(&self.socket_path).await.is_ok() {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by moedex app-server daemon"
             ));
         }
 
@@ -717,7 +722,7 @@ impl Daemon {
             && self.running_backend(&settings).await?.is_none()
         {
             return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
+                "app server is running but is not managed by moedex app-server daemon"
             ));
         }
         settings.save(&self.settings_file).await?;
@@ -829,7 +834,7 @@ impl Daemon {
             .settings_file
             .parent()
             .and_then(Path::parent)
-            .context("daemon settings path has no Codex home")?;
+            .context("daemon settings path has no Moedex home")?;
         Ok(managed_install::is_stable_standalone_release(
             codex_home,
             &self.current_managed_codex_bin()?,
@@ -842,7 +847,7 @@ impl Daemon {
             .settings_file
             .parent()
             .and_then(Path::parent)
-            .context("daemon settings path has no Codex home")?;
+            .context("daemon settings path has no Moedex home")?;
         Ok(managed_install::managed_codex_bin(home))
     }
 
@@ -851,7 +856,7 @@ impl Daemon {
             .parent()
             .and_then(Path::parent)
             .is_some_and(|home| {
-                home.join("packages/standalone/auto-update-version")
+                home.join("packages/moedex/standalone/auto-update-version")
                     .is_file()
             })
     }
@@ -876,13 +881,13 @@ impl Daemon {
 
         let managed_codex_path = self.managed_codex_bin.display();
         let install_command = if cfg!(windows) {
-            "irm https://chatgpt.com/codex/install.ps1 | iex"
+            "irm https://github.com/zak-keown/moedex/releases/latest/download/install.ps1 | iex"
         } else {
-            "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+            "curl -fsSL https://github.com/zak-keown/moedex/releases/latest/download/install.sh | sh"
         };
         Err(anyhow!(
-            "managed standalone Codex install not found at {managed_codex_path}\n\n\
-             This command requires the standalone install managed by the Codex installer, because \
+            "managed standalone Moedex install not found at {managed_codex_path}\n\n\
+             This command requires the standalone install managed by the Moedex installer, because \
              the daemon starts and updates app-server from that fixed path.\n\n\
              Install it with:\n  {install_command}\n\n\
              Then rerun the command you just tried."
@@ -925,10 +930,10 @@ impl Daemon {
         DaemonSettings::load(&self.settings_file).await
     }
 
-    async fn acquire_operation_lock(&self) -> Result<tokio::fs::File> {
+    async fn acquire_operation_lock(&self) -> Result<OperationLock> {
         let operation_lock = self.open_operation_lock_file().await?;
         let deadline = tokio::time::Instant::now() + OPERATION_LOCK_TIMEOUT;
-        while !try_lock_file(&operation_lock)? {
+        while !try_lock_file(&operation_lock.file)? {
             if tokio::time::Instant::now() >= deadline {
                 return Err(anyhow!(
                     "timed out waiting for daemon operation lock {}",
@@ -940,7 +945,13 @@ impl Daemon {
         Ok(operation_lock)
     }
 
-    async fn open_operation_lock_file(&self) -> Result<tokio::fs::File> {
+    async fn open_operation_lock_file(&self) -> Result<OperationLock> {
+        let home = self
+            .settings_file
+            .parent()
+            .and_then(Path::parent)
+            .context("daemon settings path has no product home")?;
+        let home_guard = codex_diagnostics::acquire_selected_daemon_home_guard(home)?;
         if let Some(parent) = self.operation_lock_file.parent() {
             #[cfg(unix)]
             if let Some(home) = parent.parent() {
@@ -955,7 +966,7 @@ impl Daemon {
                     )
                 })?;
         }
-        tokio::fs::OpenOptions::new()
+        let file = tokio::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
@@ -966,7 +977,11 @@ impl Daemon {
                     "failed to open daemon operation lock {}",
                     self.operation_lock_file.display()
                 )
-            })
+            })?;
+        Ok(OperationLock {
+            file,
+            _home_guard: home_guard,
+        })
     }
 
     async fn output(
@@ -1081,6 +1096,72 @@ mod tests {
     use crate::client::ProbeInfo;
     #[cfg(unix)]
     use crate::settings::DaemonSettings;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn same_host_daemon_child_receives_its_resolved_home() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = TempDir::new().expect("home");
+        let state = home.path().join("moedex-daemon");
+        std::fs::create_dir(&state).expect("state");
+        let binary = home.path().join("child");
+        std::fs::write(&binary, "#!/bin/sh\ncase \"$*\" in *--help*) exit 0;; esac\nprintf '%s|%s' \"$MOEDEX_HOME\" \"$CODEX_HOME\" > \"$MOEDEX_HOME/observed-home\"\nexec sleep 30\n").expect("child");
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        let backend = crate::backend::pid_backend(crate::backend::BackendPaths {
+            codex_bin: binary,
+            pid_file: state.join("app-server.pid"),
+            update_pid_file: state.join("updater.pid"),
+            remote_control_enabled: false,
+        });
+        backend.start().await.expect("start");
+        let observed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(value) =
+                    tokio::fs::read_to_string(home.path().join("observed-home")).await
+                {
+                    break value;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        backend.stop().await.expect("stop");
+        assert_eq!(
+            observed.expect("child received home"),
+            format!("{}|{}", home.path().display(), home.path().display())
+        );
+    }
+
+    #[tokio::test]
+    async fn daemon_operation_rejects_a_live_stock_owner() {
+        let home = TempDir::new().expect("home");
+        let stock = home.path().join("app-server-daemon");
+        std::fs::create_dir(&stock).expect("stock state");
+        let owner = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(stock.join("daemon.lock"))
+            .expect("owner");
+        owner.lock().expect("live owner");
+        let state = super::daemon_state_dir(home.path());
+        let daemon = Daemon {
+            socket_path: state.join("server.sock"),
+            pid_file: state.join("server.pid"),
+            update_pid_file: state.join("updater.pid"),
+            operation_lock_file: state.join("daemon.lock"),
+            settings_file: state.join("settings.json"),
+            managed_codex_bin: home.path().join("missing"),
+        };
+        let error = daemon
+            .run(super::LifecycleCommand::Stop)
+            .await
+            .expect_err("stock owner blocks mutation");
+        assert!(error.to_string().contains("incompatible home owner"));
+        assert!(!state.exists(), "guard runs before creating Moedex state");
+    }
 
     #[test]
     fn remote_control_status_uses_camel_case_json() {
@@ -1213,7 +1294,7 @@ mod tests {
     #[tokio::test]
     async fn stop_and_fresh_start_discard_pending_thread_restore() {
         let home = TempDir::new().expect("home");
-        let state = home.path().join("app-server-daemon");
+        let state = home.path().join("moedex-daemon");
         codex_uds::prepare_private_socket_directory(&state)
             .await
             .expect("private state directory");
@@ -1258,8 +1339,8 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let home = TempDir::new().expect("home");
-        let standalone = home.path().join("packages/standalone");
-        let local_bin = standalone.join("local-main/bin/codex");
+        let standalone = home.path().join("packages/moedex/standalone");
+        let local_bin = standalone.join("local-main/bin/moedex");
         tokio::fs::create_dir_all(local_bin.parent().expect("bin parent"))
             .await
             .expect("local bin directory");
@@ -1270,7 +1351,7 @@ mod tests {
             .expect("executable local bin");
         std::os::unix::fs::symlink("local-main", standalone.join("current"))
             .expect("current local build");
-        let state = home.path().join("app-server-daemon");
+        let state = home.path().join("moedex-daemon");
         let daemon = Daemon {
             socket_path: home
                 .path()
@@ -1279,7 +1360,7 @@ mod tests {
             update_pid_file: state.join("app-server-updater.pid"),
             operation_lock_file: state.join("daemon.lock"),
             settings_file: state.join("settings.json"),
-            managed_codex_bin: standalone.join("current/bin/codex"),
+            managed_codex_bin: standalone.join("current/bin/moedex"),
         };
         let settings = DaemonSettings::default();
         assert!(

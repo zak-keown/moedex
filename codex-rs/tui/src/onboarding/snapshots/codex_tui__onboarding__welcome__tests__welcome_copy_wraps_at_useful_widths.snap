@@ -1,0 +1,19 @@
+---
+source: tui/src/onboarding/welcome.rs
+expression: rendered
+---
+width 72:
+  Welcome to Moedex.
+  Moedex is an independent fork of OpenAI Codex
+(https://github.com/zak-keown/moedex).
+
+
+
+
+
+
+width 42:
+  Welcome to Moedex.
+  Moedex is an independent fork of OpenAI
+Codex
+(https://github.com/zak-keown/moedex).

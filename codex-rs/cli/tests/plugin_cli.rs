@@ -41,7 +41,7 @@ fn marketplace_list_row(marketplace_name: &str, root: &Path) -> String {
 }
 
 fn codex_command(codex_home: &Path) -> Result<assert_cmd::Command> {
-    let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
+    let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("moedex")?);
     cmd.env("CODEX_HOME", codex_home);
     cmd.env("HOME", codex_home);
     Ok(cmd)
@@ -1232,7 +1232,7 @@ impl RemoteMarketplaceFixture {
     }
 
     async fn run(&self, args: &[&str]) -> Result<Output> {
-        Ok(Command::new(codex_utils_cargo_bin::cargo_bin("codex")?)
+        Ok(Command::new(codex_utils_cargo_bin::cargo_bin("moedex")?)
             .current_dir(self.home.path())
             .env("CODEX_HOME", self.home.path())
             .env("HOME", self.home.path())
@@ -1860,7 +1860,7 @@ async fn remote_plugin_listing_uses_collection_when_remote_catalog_is_disabled()
         .success(&["plugin", "list", "-m", "local-only"])
         .await?;
     assert!(fixture.server.received_requests().await.unwrap().is_empty());
-    std::fs::remove_file(fixture.home.path().join("auth.json"))?;
+    std::fs::remove_file(fixture.home.path().join("moedex-auth.json"))?;
     let output = fixture.run(&["plugin", "list", "-m", MARKETPLACE]).await?;
     assert!(!output.status.success());
     assert!(String::from_utf8(output.stderr)?.contains("chatgpt authentication required"));

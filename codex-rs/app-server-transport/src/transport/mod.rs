@@ -53,15 +53,18 @@ pub use websocket::start_websocket_acceptor;
 const INTERNAL_ERROR_CODE: i64 = -32603;
 const OVERLOADED_ERROR_CODE: i64 = -32001;
 
-const APP_SERVER_CONTROL_SOCKET_DIR_NAME: &str = "app-server-control";
-const APP_SERVER_CONTROL_SOCKET_FILE_NAME: &str = "app-server-control.sock";
+const APP_SERVER_CONTROL_SOCKET_DIR_NAME: &str = "moedex-app-server";
+const APP_SERVER_CONTROL_SOCKET_FILE_NAME: &str = "moedex-app-server.sock";
 const APP_SERVER_STARTUP_LOCK_FILE_NAME: &str = "app-server-startup.lock";
 const DAEMON_RECOVERY_FILE_NAME: &str = "loaded-threads.json";
 
+/// Product-owned PID, settings, updater, and recovery state directory.
+pub fn daemon_state_dir(codex_home: &Path) -> PathBuf {
+    codex_home.join("moedex-daemon")
+}
+
 pub fn daemon_recovery_file_path(codex_home: &Path) -> PathBuf {
-    codex_home
-        .join("app-server-daemon")
-        .join(DAEMON_RECOVERY_FILE_NAME)
+    daemon_state_dir(codex_home).join(DAEMON_RECOVERY_FILE_NAME)
 }
 
 pub fn app_server_control_socket_path(codex_home: &Path) -> std::io::Result<AbsolutePathBuf> {
