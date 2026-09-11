@@ -81,14 +81,109 @@ fn file_storage_replace_failure_preserves_previous_auth_and_removes_plaintext_te
 
     assert_eq!(error.kind(), std::io::ErrorKind::Other);
     assert_eq!(storage.load()?, Some(original));
-    assert_eq!(
-        std::fs::read_dir(home.path())?
-            .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().contains("auth.json."))
-            .count(),
-        0
-    );
+    assert_eq!(auth_residue_count(home.path())?, 0);
     Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_backup_cleanup_failure_rolls_back_after_replacement() -> anyhow::Result<()> {
+    use std::cell::Cell;
+
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    let original = auth_with_prefix("original");
+    storage.save(&original)?;
+    let rejected_cleanup = Cell::new(false);
+
+    let error = storage
+        .save_with_cleanup_ops_for_test(
+            &auth_with_prefix("replacement"),
+            |path| {
+                if path
+                    .extension()
+                    .is_some_and(|extension| extension == "backup")
+                {
+                    rejected_cleanup.set(true);
+                    return Err(std::io::Error::other("injected backup cleanup failure"));
+                }
+                std::fs::remove_file(path)
+            },
+            sync_parent_directory,
+        )
+        .expect_err("cleanup failure must roll back");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    assert!(rejected_cleanup.get());
+    assert_eq!(storage.load()?, Some(original));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_success_syncs_parent_after_plaintext_backup_removal() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = FileAuthStorage::new(home.path().into());
+    storage.save(&auth_with_prefix("original"))?;
+    let replacement = auth_with_prefix("replacement");
+    let mut sync_count = 0;
+
+    storage.save_with_cleanup_ops_for_test(
+        &replacement,
+        |path| std::fs::remove_file(path),
+        |parent| {
+            sync_count += 1;
+            sync_parent_directory(parent)
+        },
+    )?;
+
+    assert_eq!(sync_count, 2);
+    assert_eq!(storage.load()?, Some(replacement));
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+#[test]
+fn windows_backup_cleanup_failure_abstraction_rolls_back_coherently() -> anyhow::Result<()> {
+    use std::cell::Cell;
+
+    let home = tempdir()?;
+    let target = home.path().join("auth.json");
+    let temp = home.path().join(".auth.json.test.tmp");
+    std::fs::write(&target, "original")?;
+    std::fs::write(&temp, "replacement")?;
+    let rejected_cleanup = Cell::new(false);
+
+    let error = replace_auth_file_windows_with_ops(
+        &temp,
+        &target,
+        |from, to| std::fs::rename(from, to),
+        |path| {
+            if path.to_string_lossy().contains("auth-backup") && !rejected_cleanup.replace(true) {
+                return Err(std::io::Error::other("injected backup cleanup failure"));
+            }
+            std::fs::remove_file(path)
+        },
+    )
+    .expect_err("cleanup failure must roll back");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    assert!(rejected_cleanup.get());
+    assert_eq!(std::fs::read_to_string(target)?, "original");
+    assert_eq!(auth_residue_count(home.path())?, 0);
+    Ok(())
+}
+
+fn auth_residue_count(home: &Path) -> std::io::Result<usize> {
+    Ok(std::fs::read_dir(home)?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.ends_with(".tmp") || name.ends_with(".backup") || name.contains("auth-backup")
+        })
+        .count())
 }
 
 #[tokio::test]

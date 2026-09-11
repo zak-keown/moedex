@@ -227,6 +227,21 @@ impl FileAuthStorage {
         auth: &AuthDotJson,
         replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
+        self.save_with_atomic_replace_and_cleanup(
+            auth,
+            replace,
+            |path| std::fs::remove_file(path),
+            sync_parent_directory,
+        )
+    }
+
+    fn save_with_atomic_replace_and_cleanup(
+        &self,
+        auth: &AuthDotJson,
+        replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+        remove_backup: impl FnMut(&Path) -> std::io::Result<()>,
+        sync_parent: impl FnMut(&Path) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
         let auth_file = get_auth_file(&self.codex_home);
         let parent = auth_file.parent().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "auth path has no parent")
@@ -248,7 +263,14 @@ impl FileAuthStorage {
             file.write_all(&json_data)?;
             file.sync_all()?;
             drop(file);
-            replace_auth_file_with_rollback(&temp, &auth_file, parent, replace)
+            replace_auth_file_with_rollback(
+                &temp,
+                &auth_file,
+                parent,
+                replace,
+                remove_backup,
+                sync_parent,
+            )
         })();
         if result.is_err() {
             let _ = std::fs::remove_file(&temp);
@@ -264,6 +286,21 @@ impl FileAuthStorage {
     ) -> std::io::Result<()> {
         self.save_with_atomic_replace(auth, replace)
     }
+
+    #[cfg(all(test, unix))]
+    pub(super) fn save_with_cleanup_ops_for_test(
+        &self,
+        auth: &AuthDotJson,
+        remove_backup: impl FnMut(&Path) -> std::io::Result<()>,
+        sync_parent: impl FnMut(&Path) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        self.save_with_atomic_replace_and_cleanup(
+            auth,
+            replace_auth_file,
+            remove_backup,
+            sync_parent,
+        )
+    }
 }
 
 #[cfg(unix)]
@@ -272,6 +309,8 @@ fn replace_auth_file_with_rollback(
     target: &Path,
     parent: &Path,
     replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    mut remove_backup: impl FnMut(&Path) -> std::io::Result<()>,
+    mut sync_parent: impl FnMut(&Path) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     let previous = if target.exists() {
         std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o600))?;
@@ -289,19 +328,20 @@ fn replace_auth_file_with_rollback(
 
     if let Err(error) = replace(temp, target) {
         if let Some(previous) = previous {
-            let _ = std::fs::remove_file(previous);
+            let _ = remove_backup(&previous);
         }
         return Err(error);
     }
-    if let Err(error) = sync_parent_directory(parent) {
-        restore_previous_auth(target, previous.as_deref(), parent);
+    if let Err(error) = sync_parent(parent) {
+        restore_previous_auth(target, previous.as_deref(), parent, &mut sync_parent);
         return Err(error);
     }
-    if let Some(previous) = previous
-        && let Err(error) = std::fs::remove_file(&previous)
-    {
-        restore_previous_auth(target, Some(&previous), parent);
-        return Err(error);
+    if let Some(previous) = previous {
+        if let Err(error) = remove_backup(&previous) {
+            restore_previous_auth(target, Some(&previous), parent, &mut sync_parent);
+            return Err(error);
+        }
+        sync_parent(parent)?;
     }
     Ok(())
 }
@@ -312,13 +352,20 @@ fn replace_auth_file_with_rollback(
     target: &Path,
     parent: &Path,
     replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    _remove_backup: impl FnMut(&Path) -> std::io::Result<()>,
+    mut sync_parent: impl FnMut(&Path) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     replace(temp, target)?;
-    sync_parent_directory(parent)
+    sync_parent(parent)
 }
 
 #[cfg(unix)]
-fn restore_previous_auth(target: &Path, previous: Option<&Path>, parent: &Path) {
+fn restore_previous_auth(
+    target: &Path,
+    previous: Option<&Path>,
+    parent: &Path,
+    sync_parent: &mut impl FnMut(&Path) -> std::io::Result<()>,
+) {
     match previous {
         Some(previous) => {
             let _ = std::fs::rename(previous, target);
@@ -327,7 +374,7 @@ fn restore_previous_auth(target: &Path, previous: Option<&Path>, parent: &Path) 
             let _ = std::fs::remove_file(target);
         }
     }
-    let _ = sync_parent_directory(parent);
+    let _ = sync_parent(parent);
 }
 
 impl AuthStorageBackend for FileAuthStorage {
@@ -357,19 +404,49 @@ fn replace_auth_file(temp: &Path, target: &Path) -> std::io::Result<()> {
 
 #[cfg(target_os = "windows")]
 fn replace_auth_file(temp: &Path, target: &Path) -> std::io::Result<()> {
+    replace_auth_file_windows_with_ops(
+        temp,
+        target,
+        |from, to| std::fs::rename(from, to),
+        |path| std::fs::remove_file(path),
+    )
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn replace_auth_file_windows_with_ops(
+    temp: &Path,
+    target: &Path,
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+    mut remove: impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
     if !target.exists() {
-        return std::fs::rename(temp, target);
+        return rename(temp, target);
     }
     let sequence = AUTH_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let backup = target.with_extension(format!("auth-backup-{}-{sequence}", std::process::id()));
-    std::fs::rename(target, &backup)?;
-    match std::fs::rename(temp, target) {
-        Ok(()) => match std::fs::remove_file(&backup) {
+    rename(target, &backup)?;
+    match rename(temp, target) {
+        Ok(()) => match remove(&backup) {
             Ok(()) => Ok(()),
-            Err(error) => Err(error),
+            Err(cleanup_error) => {
+                if let Err(rollback_error) = rename(target, temp) {
+                    return match remove(&backup) {
+                        Ok(()) => Ok(()),
+                        Err(_) => Err(rollback_error),
+                    };
+                }
+                if let Err(restore_error) = rename(&backup, target) {
+                    return match rename(temp, target).and_then(|()| remove(&backup)) {
+                        Ok(()) => Ok(()),
+                        Err(_) => Err(restore_error),
+                    };
+                }
+                remove(temp)?;
+                Err(cleanup_error)
+            }
         },
         Err(error) => {
-            let _ = std::fs::rename(backup, target);
+            let _ = rename(&backup, target);
             Err(error)
         }
     }
