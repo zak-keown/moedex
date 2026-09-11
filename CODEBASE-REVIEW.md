@@ -15,9 +15,9 @@ findings:
 verified: false
 status: issues_found
 dispositions:
-  fixed: 2
+  fixed: 3
   stale: 0
-  skipped: 2
+  skipped: 1
   deferred: 0
   open: 256
 ---
@@ -112,10 +112,10 @@ Net effect: any time a periodic/startup remote-plugin sync (`sync_remote_install
 
 Fix: `remove_old_plugin_versions` (and the whole-`target_root`-replacement branch in `replace_plugin_root_atomically`) should preserve any directory equal to `DEFAULT_PLUGIN_VERSION`, matching the exclusion already applied for trust purposes in `script_attribution.rs`.
 
-**Disposition:** skipped
-**Commit:** —
+**Disposition:** fixed
+**Commit:** `fb888f9151`
 **Resolved:** 2026-09-11
-**Note:** Report's blanket fix (preserve any DEFAULT_PLUGIN_VERSION dir) breaks intended, tested behavior: 'local' is the fallback version for any version-less install, and refresh_curated/non_curated_plugin_cache are DESIGNED to upgrade that placeholder to the real numbered version — asserted by manager_tests.rs refresh_curated_plugin_cache_replaces_existing_local_version_with_short_sha_version and refresh_non_curated_..._with_manifest_version. My fix made a red test green but turned those two passing intent-encoding tests red. Distinguishing a deliberate developer override from the version-less placeholder is a product decision, not a mechanical fix — needs maintainer input. Attempted fix + tests reverted (store.rs, store_tests.rs). See task-observer obs 0002.
+**Note:** Narrow marker-based fix (chosen by maintainer over the report's blanket "preserve any DEFAULT_PLUGIN_VERSION dir", which would have broken intended, tested behavior). `local` is also the version-less placeholder that refresh_curated/non_curated_plugin_cache are DESIGNED to upgrade to a numbered release — asserted by manager_tests.rs refresh_curated_plugin_cache_replaces_existing_local_version_with_short_sha_version and refresh_non_curated_..._with_manifest_version, both of which still pass. A `local` directory is now preserved across sync ONLY when it carries the opt-in marker file `.codex-local-override` (LOCAL_OVERRIDE_MARKER): `remove_old_plugin_versions` skips it and the wholesale target_root replacement branch carries it forward from the backup. An unmarked placeholder is still upgraded. Full core-plugins suite green (441). Initial blanket attempt was reverted first; see task-observer obs 0002.
 ### CR-003: SanitizedGitUrl leaves embedded credentials unredacted for SCP-style remotes with a second `@`
 
 **File:** `codex-rs/protocol/src/sanitized_git_url.rs`
