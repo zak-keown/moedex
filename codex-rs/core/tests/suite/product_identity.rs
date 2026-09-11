@@ -15,6 +15,7 @@ use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use std::fs;
+use std::sync::Arc;
 
 const MOEDEX_IDENTITY: &str =
     "You are operating in Moedex, an agentic coding interface based on the Codex CLI.";
@@ -76,6 +77,15 @@ async fn moedex_identity_is_added_once_without_rewriting_resumed_history() -> Re
     );
 
     let rollout_path = initial.codex.rollout_path().expect("rollout path");
+    initial.codex.shutdown_and_wait().await?;
+    let rollout = fs::read_to_string(&rollout_path)?;
+    let legacy_rollout = rollout
+        .lines()
+        .filter(|line| !line.contains("\"type\":\"turn_context\""))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(&rollout_path, legacy_rollout)?;
     let historical_rollout = fs::read(&rollout_path)?;
     let resumed_mock = mount_sse_once(
         &server,
@@ -86,7 +96,16 @@ async fn moedex_identity_is_added_once_without_rewriting_resumed_history() -> Re
         ]),
     )
     .await;
-    let resumed = builder.restart(&server, &initial).await?;
+    let mut resume_builder = test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::Personality)
+            .expect("enable personality");
+        config.personality = Some(Personality::Pragmatic);
+    });
+    let resumed = resume_builder
+        .resume(&server, Arc::clone(&initial.home), rollout_path.clone())
+        .await?;
 
     let rollout_after_resume = fs::read(&rollout_path)?;
     assert!(rollout_after_resume.starts_with(&historical_rollout));

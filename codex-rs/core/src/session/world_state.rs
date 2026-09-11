@@ -45,21 +45,25 @@ impl Session {
             "building step world state"
         );
         let model_instructions = model_info.get_model_instructions(personality);
-        let model_instructions = if !turn_context.config.update_plan_enabled
+        let filter_update_plan_instructions = !turn_context.config.update_plan_enabled
             && turn_context.config.model_catalog.is_none()
             && (turn_context.config.base_instructions.is_none()
                 || matches!(
                     turn_context.config.base_instructions_provenance,
                     Some(BaseInstructionsProvenance::Model { .. })
-                )) {
+                ));
+        let model_instructions = if filter_update_plan_instructions {
             crate::context::without_update_plan_instructions(&model_instructions)
         } else {
             model_instructions
         };
         // Compare against the persisted template before request-local Moedex branding is added.
         let base_instructions = self.get_base_instructions().await;
-        let base_instructions_provenance = base_instructions.provenance.clone();
-        let base_instructions = base_instructions.text;
+        let base_instructions = if filter_update_plan_instructions {
+            crate::context::without_update_plan_instructions(&base_instructions.text)
+        } else {
+            base_instructions.text
+        };
         let (previous_model, previous_context, base_instructions) = {
             let state = self.state.lock().await;
             (
@@ -81,12 +85,8 @@ impl Session {
                 base_instructions,
             )
         };
-        let personality_is_baked = model_info.supports_personality()
-            && (base_instructions == model_instructions
-                || matches!(
-                    base_instructions_provenance,
-                    Some(BaseInstructionsProvenance::Model { model }) if model == model_info.slug
-                ));
+        let personality_is_baked =
+            model_info.supports_personality() && base_instructions == model_instructions;
         let environment_subagents = if turn_context.config.include_environment_context {
             self.services
                 .agent_control
