@@ -116,6 +116,24 @@ impl App {
             self.selected -= 1;
         }
     }
+
+    /// Handle a finished background apply job. The in-flight guard tracks the
+    /// background job, not the modal, so it is cleared unconditionally — the
+    /// user may have dismissed the apply modal while the job was still running.
+    /// Returns whether the modal is still open for `id` and should render the
+    /// result. If the guard were only cleared while the modal is open for this
+    /// task, dismissing the modal mid-run would leave it stuck true and disable
+    /// Apply for the rest of the session.
+    pub fn on_apply_finished(&mut self, id: &TaskId) -> bool {
+        self.apply_inflight = false;
+        self.apply_modal.as_ref().is_some_and(|m| &m.task_id == id)
+    }
+
+    /// Handle a finished background preflight job. See [`Self::on_apply_finished`].
+    pub fn on_apply_preflight_finished(&mut self, id: &TaskId) -> bool {
+        self.apply_preflight_inflight = false;
+        self.apply_modal.as_ref().is_some_and(|m| &m.task_id == id)
+    }
 }
 
 pub async fn load_tasks(
@@ -356,6 +374,75 @@ mod tests {
     use chrono::Utc;
     use codex_cloud_tasks_client::CloudBackendFuture;
     use codex_cloud_tasks_client::CloudTaskError;
+
+    fn apply_modal_for(id: &TaskId) -> ApplyModalState {
+        ApplyModalState {
+            task_id: id.clone(),
+            title: "task".to_string(),
+            result_message: None,
+            result_level: None,
+            skipped_paths: Vec::new(),
+            conflict_paths: Vec::new(),
+            diff_override: None,
+        }
+    }
+
+    #[test]
+    fn apply_finished_clears_inflight_even_when_modal_dismissed() {
+        // User started an apply, then dismissed the modal before it returned.
+        let id = TaskId("task-1".to_string());
+        let mut app = App::new();
+        app.apply_inflight = true;
+        app.apply_modal = None;
+
+        let should_render = app.on_apply_finished(&id);
+
+        // The guard must clear so Apply is not disabled for the rest of the
+        // session; there is no modal to render into.
+        assert!(!app.apply_inflight);
+        assert!(!should_render);
+    }
+
+    #[test]
+    fn apply_preflight_finished_clears_inflight_even_when_modal_dismissed() {
+        let id = TaskId("task-1".to_string());
+        let mut app = App::new();
+        app.apply_preflight_inflight = true;
+        app.apply_modal = None;
+
+        let should_render = app.on_apply_preflight_finished(&id);
+
+        assert!(!app.apply_preflight_inflight);
+        assert!(!should_render);
+    }
+
+    #[test]
+    fn apply_finished_still_renders_when_modal_open_for_task() {
+        let id = TaskId("task-1".to_string());
+        let mut app = App::new();
+        app.apply_inflight = true;
+        app.apply_modal = Some(apply_modal_for(&id));
+
+        let should_render = app.on_apply_finished(&id);
+
+        assert!(!app.apply_inflight);
+        assert!(should_render);
+    }
+
+    #[test]
+    fn apply_finished_clears_inflight_when_modal_shows_a_different_task() {
+        let running = TaskId("task-1".to_string());
+        let other = TaskId("task-2".to_string());
+        let mut app = App::new();
+        app.apply_inflight = true;
+        // The modal was reopened for a different task while the first apply ran.
+        app.apply_modal = Some(apply_modal_for(&other));
+
+        let should_render = app.on_apply_finished(&running);
+
+        assert!(!app.apply_inflight);
+        assert!(!should_render);
+    }
 
     struct FakeBackend {
         // maps env key to titles
